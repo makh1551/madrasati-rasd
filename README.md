@@ -9,3 +9,8 @@ javascript:(function(){var s=document.createElement('script');s.src='https://cdn
 ```
 
 إعداد وتطوير: عبدالمجيد السيد
+
+## إضافة المتصفح (Chrome / Edge)
+
+حمّل [madrasati-rasd-extension.zip](https://github.com/makh1551/madrasati-rasd/raw/main/madrasati-rasd-extension.zip)، ثم اتبع ملف «طريقة التثبيت.txt» داخله.
+زر واحد: «⚡ رصد كل غير المرصود الآن» — مع خيار «جميع الطلاب حاضرون» أو «يوجد غياب».
