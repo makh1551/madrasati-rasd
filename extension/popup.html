@@ -36,6 +36,10 @@
   .day.dis{opacity:.35;cursor:default}
   .quickpick{justify-content:space-between;font-size:11.5px}
   .quickpick a{color:#38bdf8;text-decoration:none}
+  .sc{display:flex;align-items:center;gap:7px;padding:4px 0}
+  .sc input{margin:0}.sc small{color:var(--mut);font-size:10.5px}
+  .sc .del{margin-inline-start:auto;color:#64748b;cursor:pointer;font-size:14px;padding:0 4px}
+  .sec.row{gap:8px}
   footer{padding:8px 16px 12px;color:#64748b;font-size:11px;text-align:center}
 </style>
 </head>
@@ -50,7 +54,6 @@
   <div id="absBox">
     <div class="hint">اسم كل غائب في سطر (الاسم الأول واسم الأب على الأقل):</div>
     <textarea id="names" placeholder="مثال:&#10;محمد أحمد&#10;خالد سعد"></textarea>
-    <button id="rep" style="background:transparent;color:var(--mut);border:1px dashed var(--line);margin-top:6px;padding:6px;font-weight:normal">تقرير الغياب لهذه الجلسة</button>
   </div>
   <div class="sec">
     <div class="row">
@@ -68,8 +71,22 @@
       <a href="#" id="pickNone">إلغاء التحديد</a>
     </div>
   </div>
-  <button id="quick">⚡ رصد غير المرصود للأيام المحددة</button>
-  <button id="open">فتح لوحة الرصد التفصيلية</button>
+  <div class="sec">
+    <div class="lbl" style="margin-bottom:6px">المدارس:</div>
+    <div id="schools"><div class="hint">افتح منصة مدرستي ليظهر اسم مدرستك هنا.</div></div>
+    <div class="hint" style="margin-top:6px">لإضافة مدرسة أخرى: سجّل الدخول عليها في المنصة وافتح الإضافة مرة واحدة، فتُحفظ تلقائياً.</div>
+  </div>
+  <div class="sec row">
+    <span class="lbl">السرعة:</span>
+    <select id="speed">
+      <option value="1">عادية (حصة بحصة)</option>
+      <option value="2">سريعة (حصتان معاً)</option>
+      <option value="3" selected>أسرع (3 حصص معاً)</option>
+      <option value="4">قصوى (4 حصص معاً)</option>
+    </select>
+  </div>
+  <button id="quick">🔍 فحص ومعاينة ثم رصد</button>
+  <button id="open">فتح اللوحة التفصيلية (الأداة الأصلية)</button>
   <div id="status"></div>
 </main>
 <footer>إعداد وتطوير: عبدالمجيد السيد</footer>

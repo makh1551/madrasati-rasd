@@ -100,75 +100,49 @@ function pageAbsReport() {
   var a = window.__smAbsExt;
   return a ? { matched: a.report.matched, periods: a.report.periods, noAbs: a.report.noAbsentOption } : null;
 }
-async function pageRunDays(days) {
-  if (window.__smRunning) return { ok: false, err: 'running' };
-  window.__smRunning = true;
-  var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
-  var $ = function (id) { return document.getElementById(id); };
-  var visible = function (el) { return el && getComputedStyle(el).display !== 'none'; };
+function pageSchool() {
+  var q = new URLSearchParams(location.search);
+  var id = q.get('schoolId') || q.get('SchoolId') || (document.getElementById('hSchoolId') || {}).value ||
+    (document.querySelector('input[name="SchoolId"]') || {}).value || localStorage.getItem('madrasati_hSchoolId') || localStorage.getItem('globalschoolId') || '';
+  var el = document.querySelector('.school-name, .user-school-name, #schoolName, .navbar-brand span');
+  var nm = (el && el.textContent.trim()) || localStorage.getItem('school_name_' + id) || localStorage.getItem('madrasati_schoolName') || '';
+  return { id: String(id || ''), name: nm };
+}
 
-  // شارة حالة عائمة في الصفحة
-  var badge = $('sm-ext-run-badge');
-  if (!badge) {
-    badge = document.createElement('div');
-    badge.id = 'sm-ext-run-badge';
-    badge.style.cssText = 'position:fixed;top:12px;right:12px;z-index:10000005;background:#065f46;color:#fff;padding:10px 14px;border-radius:10px;font:600 13px Tahoma,sans-serif;direction:rtl;box-shadow:0 6px 20px rgba(0,0,0,.35);max-width:320px;line-height:1.6';
-    document.body.appendChild(badge);
-  }
-  var say = function (t) { badge.textContent = t; };
-
-  // انتظار انتهاء أي تحميل/رصد جارٍ (شريط التقدم مخفي لمدة متواصلة)
-  async function waitIdle(maxMs) {
-    var t0 = Date.now(), calm = 0;
-    while (Date.now() - t0 < maxMs) {
-      var bar = $('sm-progress-bar-container');
-      if (bar && !visible(bar)) { calm += 300; if (calm >= 1500) return true; } else calm = 0;
-      await sleep(300);
-    }
-    return false;
-  }
-
-  var results = [];
-  try {
-    say('⏳ جاري تحميل الفصول والجداول…');
-    for (var w = 0; w < 100 && !$('sm-input-date'); w++) await sleep(300);
-    if (!$('sm-input-date')) return { ok: false, err: 'noTool' };
-    if (!(await waitIdle(180000))) return { ok: false, err: 'timeout' };
-
-    // التأكد من عرض اليوم
-    var tabDay = $('sm-tab-day'); if (tabDay) tabDay.click();
-
-    for (var i = 0; i < days.length; i++) {
-      var d = days[i];
-      say('📅 [' + (i + 1) + '/' + days.length + '] ' + d.name + ': جاري التحميل…');
-      var inp = $('sm-input-date');
-      inp.value = d.date;
-      inp.dispatchEvent(new Event('change', { bubbles: true }));
-      await sleep(600);
-      if (!(await waitIdle(180000))) { results.push({ day: d.name, err: 'timeout' }); continue; }
-
-      var unrec = document.querySelectorAll('.sm-cell-unrecorded').length;
-      say('⚡ [' + (i + 1) + '/' + days.length + '] ' + d.name + ': رصد ' + unrec + ' حصة…');
-      var old = $('sm-custom-confirm-modal'); if (old) old.remove();
-      $('sm-btn-attend-all-unrecorded').click();
-
-      var yes = null;
-      for (var k = 0; k < 16; k++) { await sleep(250); yes = $('sm-confirm-btn-yes'); if (yes) break; }
-      if (!yes) { results.push({ day: d.name, count: 0 }); continue; }   // لا توجد حصص غير مرصودة
-      yes.click();
-      await sleep(800);
-      await waitIdle(30 * 60 * 1000);
-      var left = document.querySelectorAll('.sm-cell-unrecorded').length;
-      results.push({ day: d.name, count: unrec, left: left });
-    }
-    var total = results.reduce(function (s, r) { return s + (r.count || 0); }, 0);
-    say('✅ انتهى الرصد: ' + total + ' حصة في ' + days.length + ' يوم');
-    setTimeout(function () { badge.remove(); }, 15000);
-    return { ok: true, results: results };
-  } catch (e) {
-    say('❌ توقف الرصد: ' + (e && e.message || e));
-    return { ok: false, err: String(e && e.message || e) };
-  } finally { window.__smRunning = false; }
+/* ---------- المدارس المحفوظة ---------- */
+var schoolList = [], currentId = '';
+function renderSchools() {
+  var box = $('schools');
+  if (!schoolList.length) return;
+  box.innerHTML = '';
+  schoolList.forEach(function (sc, i) {
+    var row = document.createElement('label'); row.className = 'sc';
+    row.innerHTML = '<input type="checkbox"' + (sc.on ? ' checked' : '') + '><span>' + sc.name.replace(/</g, '&lt;') + '</span>' +
+      (sc.id === currentId ? '<small>(الحالية)</small>' : '') + '<span class="del" title="حذف من القائمة">×</span>';
+    row.querySelector('input').onchange = function (e) { sc.on = e.target.checked; saveSchools(); };
+    row.querySelector('.del').onclick = function (e) { e.preventDefault(); schoolList.splice(i, 1); saveSchools(); renderSchools(); };
+    box.appendChild(row);
+  });
+}
+function saveSchools() { chrome.storage.local.set({ schools: schoolList }); }
+function chosenSchools() { return schoolList.filter(function (s) { return s.on; }).map(function (s) { return { id: s.id, name: s.name }; }); }
+function loadSchools() {
+  chrome.storage.local.get(['schools', 'speed'], async function (r) {
+    schoolList = Array.isArray(r.schools) ? r.schools : [];
+    if (r.speed) $('speed').value = r.speed;
+    try {
+      var tab = await activeTab();
+      var cur = await run(tab.id, { func: pageSchool });
+      if (cur && cur.id) {
+        currentId = cur.id;
+        var ex = schoolList.find(function (s) { return s.id === cur.id; });
+        if (ex) { if (cur.name) ex.name = cur.name; }
+        else { schoolList.forEach(function (s) { s.on = false; }); schoolList.push({ id: cur.id, name: cur.name || ('مدرسة ' + cur.id), on: true }); }
+        saveSchools();
+      }
+    } catch (e) {}
+    renderSchools();
+  });
 }
 
 /* ---------- التشغيل ---------- */
@@ -187,35 +161,27 @@ async function start(quick) {
   save();
   var m = mode(), names = namesList();
   if (m === 'abs' && !names.length) { status('اكتب أسماء الغائبين، أو اختر «جميع الطلاب حاضرون».', 'err'); return; }
-  var days = chosenDates();
-  if (quick) {
-    if (!days.length) { status('اختر يوماً واحداً على الأقل.', 'err'); return; }
-    var msg = 'سيتم رصد كل الحصص غير المرصودة في ' + days.length + ' يوم:\n' +
-      days.map(function (d) { return '• ' + d.name; }).join('\n') + '\n\n' +
-      (m === 'abs' ? '⚠️ الغائبون (' + names.length + ') سيُرصدون غائبين في كل هذه الأيام، والباقون حاضرين.' : 'جميع الطلاب سيُرصدون حاضرين.') +
-      '\n\nمتابعة؟';
-    if (!confirm(msg)) return;
-  }
   busy(true);
   try {
-    var tab = await prepare(m, names);
-    if (!quick) { status('تم فتح لوحة الرصد في الصفحة.', 'ok'); window.close(); return; }
-
-    status('بدأ الرصد. يمكنك إغلاق هذه النافذة، وتابع الشارة الخضراء أعلى صفحة المنصة. لا تغلق صفحة المنصة حتى ينتهي.');
-    var r = await run(tab.id, { func: pageRunDays, args: [days] });
-    if (!r) status('تعذّر التشغيل. حدّث صفحة المنصة وحاول مجدداً.', 'err');
-    else if (!r.ok) {
-      var why = { running: 'هناك عملية رصد جارية الآن، انتظر انتهاءها.', timeout: 'استغرق التحميل وقتاً طويلاً. تأكد من تسجيل الدخول بحساب المدير.', noTool: 'لم تظهر لوحة الرصد. حدّث صفحة الفصول وحاول مجدداً.' };
-      status(why[r.err] || ('توقف: ' + r.err), 'err');
-    } else {
-      var lines = r.results.map(function (x) {
-        if (x.err) return '⚠️ ' + x.day + ': تعذّر التحميل';
-        if (!x.count) return '✅ ' + x.day + ': لا توجد حصص غير مرصودة';
-        return '✅ ' + x.day + ': رُصدت ' + x.count + ' حصة' + (x.left ? ' (بقي ' + x.left + ')' : '');
-      });
-      status(lines.join('\n'), 'ok');
-      $('status').style.whiteSpace = 'pre-line';
+    if (!quick) {
+      await prepare(m, names);
+      status('تم فتح اللوحة التفصيلية في الصفحة.', 'ok'); window.close(); return;
     }
+    var days = chosenDates();
+    if (!days.length) { status('اختر يوماً واحداً على الأقل.', 'err'); return; }
+    var schools = chosenSchools();
+    if (!schools.length) { status('اختر مدرسة واحدة على الأقل.', 'err'); return; }
+    var tab = await activeTab();
+    tab = await ensureClassroomsPage(tab);
+    var cur = await run(tab.id, { func: pageSchool });
+    await run(tab.id, { files: ['engine.js'] });
+    await run(tab.id, {
+      func: function (cfg) { return window.__smEngine.open(cfg); },
+      args: [{ mode: m, names: names, dates: days.map(function (d) { return d.date; }), schools: schools,
+               currentSchoolId: cur && cur.id, concurrency: parseInt($('speed').value, 10) }]
+    });
+    chrome.storage.local.set({ speed: $('speed').value });
+    window.close();
   } catch (e) {
     if (e && e.message === 'notMadrasati') status('افتح منصة مدرستي (schools.madrasati.sa) بحساب المدير أولاً، ثم اضغط الزر.', 'err');
     else status('حدث خطأ: ' + (e && e.message || e), 'err');
@@ -257,4 +223,4 @@ document.querySelectorAll('input[name=mode]').forEach(function (r) { r.onchange 
 $('names').oninput = save;
 $('quick').onclick = function () { start(true); };
 $('open').onclick = function () { start(false); };
-$('rep').onclick = showReport;
+loadSchools();
