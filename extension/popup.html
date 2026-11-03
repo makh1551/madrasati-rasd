@@ -23,13 +23,26 @@
   button:disabled{opacity:.55;cursor:default}
   #status{margin-top:10px;min-height:18px;font-size:12px;color:var(--mut);line-height:1.6}
   #status.err{color:#f87171}#status.ok{color:#34d399}
+  .sec{border:1px solid var(--line);border-radius:8px;padding:9px 10px;margin:2px 0 10px;background:var(--card)}
+  .row{display:flex;align-items:center;gap:8px}
+  .lbl{color:var(--mut);font-size:12px}
+  select{flex:1;background:var(--bg);color:var(--txt);border:1px solid #475569;border-radius:6px;padding:5px;font:inherit}
+  .days{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin:9px 0 7px}
+  .day{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 2px;border:1px solid var(--line);border-radius:7px;cursor:pointer;font-size:11.5px;user-select:none}
+  .day input{display:none}
+  .day small{color:var(--mut);font-size:10px}
+  .day.on{background:var(--pri);border-color:#38bdf8;color:#fff}
+  .day.on small{color:#e0f2fe}
+  .day.dis{opacity:.35;cursor:default}
+  .quickpick{justify-content:space-between;font-size:11.5px}
+  .quickpick a{color:#38bdf8;text-decoration:none}
   footer{padding:8px 16px 12px;color:#64748b;font-size:11px;text-align:center}
 </style>
 </head>
 <body>
 <header>
   <b>⚡ رصد الحضور السريع</b>
-  <small>منصة مدرستي — الحصص غير المرصودة لليوم</small>
+  <small>منصة مدرستي — رصد يوم أو عدة أيام أو أسبوع كامل</small>
 </header>
 <main>
   <label class="opt" id="optAll"><input type="radio" name="mode" value="all"> ✅ جميع الطلاب حاضرون</label>
@@ -39,7 +52,23 @@
     <textarea id="names" placeholder="مثال:&#10;محمد أحمد&#10;خالد سعد"></textarea>
     <button id="rep" style="background:transparent;color:var(--mut);border:1px dashed var(--line);margin-top:6px;padding:6px;font-weight:normal">تقرير الغياب لهذه الجلسة</button>
   </div>
-  <button id="quick">⚡ رصد كل غير المرصود الآن</button>
+  <div class="sec">
+    <div class="row">
+      <span class="lbl">الأسبوع:</span>
+      <select id="week">
+        <option value="0">الأسبوع الحالي</option>
+        <option value="-1">الأسبوع الماضي</option>
+        <option value="-2">قبل أسبوعين</option>
+      </select>
+    </div>
+    <div id="days" class="days"></div>
+    <div class="row quickpick">
+      <a href="#" id="pickToday">اليوم فقط</a>
+      <a href="#" id="pickAll">الأسبوع كامل</a>
+      <a href="#" id="pickNone">إلغاء التحديد</a>
+    </div>
+  </div>
+  <button id="quick">⚡ رصد غير المرصود للأيام المحددة</button>
   <button id="open">فتح لوحة الرصد التفصيلية</button>
   <div id="status"></div>
 </main>
