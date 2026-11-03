@@ -1,7 +1,6 @@
 /*
  * محرك الرصد السريع — يعمل داخل صفحة منصة مدرستي (MAIN world)
  * فحص ← معاينة ← رصد متوازٍ مع إعادة محاولة ← تحقق ← صورة نسب الرصد
- * إعداد وتطوير: عبدالمجيد السيد
  */
 (function () {
   'use strict';
@@ -460,7 +459,7 @@
     var schools = Object.keys(bySchool).map(function (k) { return bySchool[k]; });
     var Wd = 1080, rowH = 46, pad = 60, h = 260;
     schools.forEach(function (s) { h += 150 + Object.keys(s.cls).length * rowH; });
-    h += 90;
+    h += 30;
     var cv = document.createElement('canvas'); cv.width = Wd; cv.height = h;
     var g = cv.getContext('2d'); g.direction = 'rtl'; g.textAlign = 'right';
     var grad = g.createLinearGradient(0, 0, 0, h); grad.addColorStop(0, '#0f172a'); grad.addColorStop(1, '#111827');
@@ -491,8 +490,6 @@
       });
       y += 55;
     });
-    g.fillStyle = '#64748b'; g.font = F(20, 'normal'); g.textAlign = 'center';
-    g.fillText('إعداد وتطوير: عبدالمجيد السيد', Wd / 2, h - 40);
     var a = document.createElement('a');
     a.download = 'نسب-رصد-الحضور-' + ds[ds.length - 1] + '.png';
     a.href = cv.toDataURL('image/png'); document.body.appendChild(a); a.click(); a.remove();

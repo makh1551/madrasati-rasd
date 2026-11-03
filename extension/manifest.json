@@ -3,7 +3,7 @@
   "name": "رصد الحضور السريع — مدرستي",
   "short_name": "رصد مدرستي",
   "version": "1.2.0",
-  "description": "رصد حضور الحصص غير المرصودة في منصة مدرستي بضغطة زر، مع خيار تسجيل الغائبين. إعداد وتطوير: عبدالمجيد السيد",
+  "description": "رصد حضور الحصص غير المرصودة في منصة مدرستي بضغطة زر، مع خيار تسجيل الغائبين.",
   "permissions": ["scripting", "activeTab", "storage"],
   "host_permissions": ["https://schools.madrasati.sa/*"],
   "action": {
