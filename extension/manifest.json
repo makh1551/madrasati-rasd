@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "رصد الحضور السريع — مدرستي",
   "short_name": "رصد مدرستي",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "رصد حضور الحصص غير المرصودة في منصة مدرستي بضغطة زر، مع خيار تسجيل الغائبين.",
   "permissions": [
     "scripting",

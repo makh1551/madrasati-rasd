@@ -69,6 +69,8 @@
     '.sc{display:flex;align-items:center;gap:10px;font-size:15px;padding:4px 0}.sc input{width:20px;height:20px;margin:0}' +
     '.go{position:sticky;bottom:0;width:100%;min-height:56px;border:0;border-radius:14px;background:#047857;color:#fff;font-size:17px;font-weight:700;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.45)}' +
     '.cnt{font-size:14px;color:#38bdf8;font-weight:700}.nm{flex:1;min-width:0;background:#0f172a;color:#e2e8f0;border:1px solid #475569;border-radius:8px;padding:8px 10px;font-size:15px}.del{background:none;border:0;color:#64748b;font-size:22px;width:36px;height:36px;cursor:pointer}' +
+    '.rep{width:100%;min-height:50px;border:1.5px solid #334155;border-radius:14px;background:#1e293b;color:#e2e8f0;font-size:15.5px;font-weight:700;cursor:pointer}' +
+    '.res{border:1.5px solid #f59e0b;background:rgba(245,158,11,.08);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px;font-size:15px;color:#fde68a}.res .qp button{font-weight:700;font-size:15.5px}' +
     '.go:disabled{opacity:.6}.msg{font-size:14px;line-height:1.6;color:#94a3b8;min-height:20px}.msg.err{color:#f87171}' +
     '</style>' +
     '<button class="fab" type="button" id="fab" aria-label="رصد الحضور السريع"><span aria-hidden="true">⚡</span><span>رصد</span></button>';
@@ -119,6 +121,7 @@
       '<div class="sheet" role="dialog" aria-label="رصد الحضور السريع">' +
       '<div class="hd"><div><b>⚡ رصد الحضور السريع</b><small>يوم، أيام مختارة، أو أسبوع كامل</small></div><button class="x" type="button" id="x" aria-label="إغلاق">×</button></div>' +
       '<div class="bd">' +
+      '<div class="res" id="res" style="display:none"><div id="resT"></div><div class="qp"><button type="button" id="resGo">▶️ أكمل الرصد</button><button type="button" id="resNo">تجاهل</button></div></div>' +
       '<label class="opt" id="oAll"><input type="radio" name="m" value="all"> ✅ جميع الطلاب حاضرون</label>' +
       '<label class="opt" id="oAbs"><input type="radio" name="m" value="abs"> ⚠️ يوجد غياب</label>' +
       '<div id="absBox" style="display:none"><div class="hint">اسم كل غائب في سطر (الاسم الأول واسم الأب على الأقل):</div><textarea id="names"></textarea></div>' +
@@ -131,6 +134,7 @@
       '<div class="sec"><div class="row"><span class="lbl">السرعة:</span><select id="speed"><option value="1">عادية (حصة بحصة)</option><option value="2">سريعة (حصتان معاً)</option><option value="3">أسرع (3 حصص معاً)</option><option value="4">قصوى (4 حصص معاً)</option></select></div></div>' +
       '<div class="msg" id="msg"></div>' +
       '<button class="go" type="button" id="go">🔍 فحص ومعاينة ثم رصد</button>' +
+      '<button class="rep" type="button" id="rep">📊 فحص وتقرير فقط (بدون رصد)</button>' +
       '</div></div>';
     root.appendChild(panel);
     $('fab').style.display = 'none';
@@ -151,7 +155,16 @@
     $('p10').onclick = function () { pickWeeks(10); };
     $('pN').onclick = function () { selected = {}; renderDays(); };
     $('speed').onchange = function () { store.set({ speed: $('speed').value }); };
-    $('go').onclick = go;
+    $('go').onclick = function () { go(false); };
+    $('rep').onclick = function () { go(true); };
+    var pend = window.__smEngine && window.__smEngine.pending && window.__smEngine.pending();
+    if (pend) {
+      var mins = Math.round((Date.now() - pend.at) / 60000);
+      $('resT').textContent = '⚠️ يوجد رصد لم يكتمل: ' + pend.count + ' حصة متبقية (قبل ' + (mins < 60 ? mins + ' دقيقة' : Math.round(mins / 60) + ' ساعة') + ').';
+      $('res').style.display = 'flex';
+      $('resGo').onclick = function () { if (window.__smEngine.resume()) close(); };
+      $('resNo').onclick = function () { window.__smEngine.discard(); $('res').style.display = 'none'; };
+    }
   }
 
   function mode() { var r = root.querySelector('input[name=m]:checked'); return r ? r.value : 'all'; }
@@ -202,11 +215,11 @@
   }
   function say(t, err) { var m = $('msg'); m.textContent = t; m.className = 'msg' + (err ? ' err' : ''); }
 
-  function go() {
+  function go(reportOnly) {
     save();
     var m = mode();
     var names = $('names').value.split(/\n|،|,/).map(function (x) { return x.trim(); }).filter(function (x) { return x.length > 1; });
-    if (m === 'abs' && !names.length) return say('اكتب أسماء الغائبين، أو اختر «جميع الطلاب حاضرون».', true);
+    if (!reportOnly && m === 'abs' && !names.length) return say('اكتب أسماء الغائبين، أو اختر «جميع الطلاب حاضرون».', true);
     var dates = Object.keys(selected).filter(function (k) { return selected[k] && k <= TODAY; }).sort();
     if (!dates.length) return say('اختر يوماً واحداً على الأقل.', true);
     var chosen = schools.filter(function (s) { return s.on; }).map(function (s) { return { id: s.id, name: s.name }; });
@@ -214,7 +227,7 @@
     if (!window.__smEngine) return say('لم يُحمَّل محرك الرصد. حدّث الصفحة وحاول مجدداً.', true);
     try {
       var ok = window.__smEngine.open({ mode: m, names: names, dates: dates, schools: chosen,
-        currentSchoolId: current && current.id, concurrency: parseInt($('speed').value, 10) });
+        currentSchoolId: current && current.id, concurrency: parseInt($('speed').value, 10), reportOnly: !!reportOnly });
       if (ok !== false) close();
     } catch (e) { say('حدث خطأ: ' + (e && e.message || e), true); }
   }

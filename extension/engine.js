@@ -235,6 +235,43 @@
     return true;
   }
 
+  /* ================= الجوال: إبقاء الشاشة مضاءة، تنبيه الانتهاء، الاستئناف ================= */
+  var wl = null;
+  async function keepAwake(on) {
+    try {
+      if (on) { if (navigator.wakeLock && !wl) { wl = await navigator.wakeLock.request('screen'); wl.addEventListener('release', function () { wl = null; }); } }
+      else if (wl) { await wl.release(); wl = null; }
+    } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', function () { if (S.busy && document.visibilityState === 'visible') keepAwake(true); });
+  var actx = null;
+  function primeAudio() { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch (e) {} }
+  function notifyDone(ok) {
+    try {
+      if (actx) [0, 0.2].forEach(function (t, i) {
+        var o = actx.createOscillator(), g = actx.createGain(), at = actx.currentTime + t;
+        o.frequency.value = ok ? (i ? 1046 : 784) : 330;
+        g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(0.25, at + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.17);
+        o.connect(g); g.connect(actx.destination); o.start(at); o.stop(at + 0.18);
+      });
+    } catch (e) {}
+    try { if (navigator.vibrate) navigator.vibrate([120, 80, 120]); } catch (e) {}
+    var t0 = document.title; document.title = (ok ? '✅ ' : '⚠️ ') + 'اكتمل الرصد'; setTimeout(function () { document.title = t0; }, 10000);
+  }
+  var RKEY = 'smRasdResume';
+  function rSave(items) {
+    try {
+      if (!items.length) { localStorage.removeItem(RKEY); return; }
+      var c = S.cfg;
+      localStorage.setItem(RKEY, JSON.stringify({ at: Date.now(), cfg: { dates: c.dates, schools: c.schools, concurrency: c.concurrency, reason: c.reason, absRaw: c.absRaw, absNames: c.absNames },
+        items: items.map(function (p) { var q = {}; for (var k in p) q[k] = p[k]; return q; }) }));
+    } catch (e) {}
+  }
+  function rLoad() {
+    try { var r = JSON.parse(localStorage.getItem(RKEY) || 'null'); if (r && r.items && r.items.length && Date.now() - r.at < 3 * 86400000) return r; } catch (e) {}
+    return null;
+  }
+
   /* ================= الواجهة ================= */
   var S = { cfg: null, periods: [], scanErrors: [], busy: false, stats: null, failed: [] };
   var root, $ = function (id) { return document.getElementById(id); };
@@ -260,6 +297,8 @@
       '#sme footer{padding:10px 18px;border-top:1px solid #334155;display:flex;gap:8px;flex-wrap:wrap;background:#0b1222}' +
       '#sme button.b{border:0;border-radius:8px;padding:9px 14px;font:inherit;font-weight:700;cursor:pointer}' +
       '#sme .go{background:#10b981;color:#fff}#sme .sec{background:#334155;color:#e2e8f0}#sme .pic{background:#0284c7;color:#fff}#sme button:disabled{opacity:.5;cursor:default}' +
+      '#sme .sum{width:100%;margin:6px 0 12px;font-size:12.5px}#sme .sum td,#sme .sum th{padding:6px 8px;border-bottom:1px solid #1e293b;text-align:right}#sme .sum th{color:#94a3b8;font-weight:600}#sme .sum .n{font-variant-numeric:tabular-nums}' +
+      '#sme .flt{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 8px}#sme .flt input,#sme .flt select{flex:1 1 160px;min-width:0;background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:8px;padding:9px 10px;font:inherit;font-size:14px}' +
       '#sme .msg{text-align:center;padding:60px 20px;color:#94a3b8}#sme .msg h4{color:#f8fafc;margin:0 0 6px}';
     document.head.appendChild(st);
   }
@@ -330,7 +369,23 @@
     } else if (!un.length) {
       body.innerHTML = '<div class="msg"><h4>✅ كل الحصص مرصودة</h4>لا توجد حصص غير مرصودة في الأيام المحددة.</div>';
     } else {
-      var html = '', key = '';
+      // ملخص لكل أسبوع
+      var wk = {};
+      S.periods.forEach(function (p) {
+        var ws = weekStart(fromYmd(p.dateStr.replace(/\//g, '-'))), k = slash(ws);
+        var w = wk[k] = wk[k] || { ws: ws, total: 0, un: 0 };
+        w.total++; if (!p.isRecorded) w.un++;
+      });
+      var html = '<table class="sum"><tr><th>الأسبوع</th><th>غير مرصود</th><th>كل الحصص</th><th>الإنجاز</th></tr>' +
+        Object.keys(wk).sort().reverse().map(function (k) {
+          var w = wk[k], e = new Date(w.ws.getFullYear(), w.ws.getMonth(), w.ws.getDate() + 4), pc = Math.round((w.total - w.un) / w.total * 100);
+          return '<tr><td>' + w.ws.getDate() + '/' + (w.ws.getMonth() + 1) + ' – ' + e.getDate() + '/' + (e.getMonth() + 1) + '</td><td class="n" style="color:' + (w.un ? '#f87171' : '#34d399') + '">' + w.un + '</td><td class="n">' + w.total + '</td><td class="n">' + pc + '%</td></tr>';
+        }).join('') + '</table>';
+      var classes = {}; un.forEach(function (p) { classes[p.classroom] = 1; });
+      html += '<div class="flt"><input id="sme-q" type="search" placeholder="بحث بالفصل أو المادة أو المعلم" aria-label="بحث في الحصص">' +
+        '<select id="sme-cls" aria-label="تصفية حسب الفصل"><option value="">كل الفصول</option>' +
+        Object.keys(classes).sort(function (a, b) { return a.localeCompare(b, 'ar'); }).map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('') + '</select></div>';
+      var key = '';
       un.forEach(function (p, i) {
         var k = p.school.id + '|' + p.dateStr;
         if (k !== key) {
@@ -339,7 +394,7 @@
           html += '<div class="grp"><span>' + esc(p.school.name) + ' — ' + esc(p.dayName) + ' ' + esc(p.dateStr) + '</span>' +
             '<label><input type="checkbox" class="sme-g" data-k="' + esc(k) + '" checked> تحديد اليوم</label></div><table>';
         }
-        html += '<tr id="sme-r' + i + '"><td style="width:28px"><input type="checkbox" class="sme-c" data-i="' + i + '" data-k="' + esc(k) + '" checked></td>' +
+        html += '<tr id="sme-r' + i + '" data-cls="' + esc(p.classroom) + '" data-txt="' + esc(norm(p.classroom + ' ' + p.title + ' ' + p.info)) + '"><td style="width:28px">' + (S.cfg.reportOnly ? '•' : '<input type="checkbox" class="sme-c" data-i="' + i + '" data-k="' + esc(k) + '" checked>') + '</td>' +
           '<td><b>' + esc(p.classroom) + '</b></td><td class="s">الحصة ' + p.slot + '</td><td>' + esc(p.title) + '</td><td class="s">' + esc(p.info) + '</td></tr>';
       });
       body.innerHTML = html + '</table>';
@@ -347,6 +402,19 @@
         g.onchange = function () { body.querySelectorAll('.sme-c[data-k="' + g.dataset.k + '"]').forEach(function (c) { c.checked = g.checked; }); count(); };
       });
       body.querySelectorAll('.sme-c').forEach(function (c) { c.onchange = count; });
+      var applyF = function () {
+        var q = norm($('sme-q').value), cl = $('sme-cls').value;
+        body.querySelectorAll('tr[data-cls]').forEach(function (tr) {
+          tr.style.display = (!cl || tr.dataset.cls === cl) && (!q || tr.dataset.txt.indexOf(q) > -1) ? '' : 'none';
+        });
+        body.querySelectorAll('.grp').forEach(function (g) {
+          var t = g.nextElementSibling; if (!t || t.tagName !== 'TABLE' || t.classList.contains('sum')) return;
+          var any = Array.from(t.rows).some(function (r) { return r.style.display !== 'none'; });
+          g.style.display = any ? '' : 'none'; t.style.display = any ? '' : 'none';
+        });
+        count();
+      };
+      $('sme-q').oninput = applyF; $('sme-cls').onchange = applyF;
     }
     if (S.scanErrors.length) {
       body.innerHTML += '<div class="grp" style="color:#f87171">تعذّر الفحص</div><table>' + S.scanErrors.map(function (e) {
@@ -354,10 +422,10 @@
       }).join('') + '</table>';
     }
     foot.innerHTML =
-      (un.length ? '<button class="b go" id="sme-go">⚡ رصد المحدد (<span id="sme-n">0</span>)</button>' +
+      (un.length && !S.cfg.reportOnly ? '<button class="b go" id="sme-go">⚡ رصد المحدد (<span id="sme-n">0</span>)</button>' +
         '<button class="b sec" id="sme-all">تحديد الكل</button><button class="b sec" id="sme-none">إلغاء التحديد</button>' : '') +
       '<button class="b pic" id="sme-img">🖼️ صورة نسب الرصد</button>';
-    if (un.length) {
+    if (un.length && !S.cfg.reportOnly) {
       $('sme-go').onclick = function () { runSelected(un); };
       $('sme-all').onclick = function () { setAll(true); };
       $('sme-none').onclick = function () { setAll(false); };
@@ -365,29 +433,40 @@
     }
     $('sme-img').onclick = makeImage;
     progress(0, 0, '');
-    function setAll(v) { body.querySelectorAll('.sme-c, .sme-g').forEach(function (c) { c.checked = v; }); count(); }
-    function count() { if ($('sme-n')) $('sme-n').textContent = body.querySelectorAll('.sme-c:checked').length; }
+    function setAll(v) { visibleChecks(body, false).forEach(function (c) { c.checked = v; }); body.querySelectorAll('.sme-g').forEach(function (g) { g.checked = v; }); count(); }
+    function count() { if ($('sme-n')) $('sme-n').textContent = visibleChecks(body, true).length; }
+  }
+
+  function visibleChecks(body, onlyChecked) {
+    return Array.from(body.querySelectorAll('.sme-c' + (onlyChecked ? ':checked' : ''))).filter(function (c) { var tr = c.closest('tr'); return !tr || tr.style.display !== 'none'; });
   }
 
   /* ---------- 3) الرصد مع إعادة المحاولة والتحقق ---------- */
   async function runSelected(un) {
-    var picked = Array.from($('sme-body').querySelectorAll('.sme-c:checked')).map(function (c) { return +c.dataset.i; });
+    var picked = visibleChecks($('sme-body'), true).map(function (c) { return +c.dataset.i; });
     if (!picked.length) { alert('حدّد حصة واحدة على الأقل.'); return; }
     var cfg = S.cfg;
     var msg = 'سيتم رصد ' + picked.length + ' حصة' + (cfg.schools.length > 1 ? ' في ' + cfg.schools.length + ' مدرسة' : '') + '.\n' +
       (cfg.absNames.length ? '⚠️ الغائبون (' + cfg.absNames.length + ') يُرصدون غائبين، والباقون حاضرين.' : 'جميع الطلاب يُرصدون حاضرين.') + '\n\nمتابعة؟';
     if (!confirm(msg)) return;
+    primeAudio(); keepAwake(true);
     S.busy = true; S.stats = { absent: {}, noAbsentOption: 0 };
     $('sme-foot').querySelectorAll('button').forEach(function (b) { b.disabled = true; });
     $('sme-body').querySelectorAll('input').forEach(function (b) { b.disabled = true; });
     var items = picked.map(function (i) { return { p: un[i], i: i, err: '' }; });
     var done = 0;
+    var pending = items.map(function (it) { return it.p; });
+    rSave(pending);
 
     async function attempt(list, label) {
       done = 0;
       await pool(list, cfg.concurrency, async function (it) {
         for (var t = 0; t < 3; t++) {
-          try { await recordOne(it.p, cfg.reason, cfg.absNames, S.stats); it.err = ''; break; }
+          try {
+            await recordOne(it.p, cfg.reason, cfg.absNames, S.stats); it.err = '';
+            var pi = pending.indexOf(it.p); if (pi > -1) { pending.splice(pi, 1); rSave(pending); }
+            break;
+          }
           catch (e) { it.err = e.message || String(e); await sleep(1200 * (t + 1)); }
         }
         var row = $('sme-r' + it.i);
@@ -417,7 +496,10 @@
     if (retry.length) await attempt(retry, 'إعادة محاولة الفاشل');
 
     S.busy = false;
+    keepAwake(false);
+    rSave([]);
     S.failed = items.filter(function (it) { return it.err; });
+    notifyDone(!S.failed.length);
     var ok = items.length - S.failed.length;
     chips();
     var absTxt = '';
@@ -501,9 +583,10 @@
     shell();
     var c = S.cfg;
     $('sme-sub').textContent = c.schools.map(function (s) { return s.name; }).join(' + ') + ' — ' + c.dates.length + ' يوم';
-    S.busy = true;
+    if (c.reportOnly) $('sme-sub').textContent += ' — فحص وتقرير فقط';
+    S.busy = true; keepAwake(true);
     try { await scan(); } catch (e) { S.scanErrors.push({ school: '', classroom: '', err: e.message }); }
-    S.busy = false;
+    S.busy = false; keepAwake(false);
     renderPreview();
   }
 
@@ -523,6 +606,18 @@
 
   W.__smEngine = {
     detectSchool: detectSchool,
+    pending: function () { var r = rLoad(); return r ? { count: r.items.length, at: r.at } : null; },
+    discard: function () { try { localStorage.removeItem(RKEY); } catch (e) {} },
+    resume: function () {
+      var r = rLoad(); if (!r) return false;
+      S.cfg = Object.assign({ reportOnly: false }, r.cfg);
+      shell();
+      $('sme-sub').textContent = 'استئناف رصد غير مكتمل — ' + r.items.length + ' حصة';
+      S.periods = r.items; chips();
+      $('sme-foot').innerHTML = '';
+      runList(r.items);
+      return true;
+    },
     open: function (cfg) {
       if (!cfg.schools || !cfg.schools.length) {
         var cur = detectSchool();
@@ -535,7 +630,8 @@
         concurrency: Math.min(5, Math.max(1, cfg.concurrency || 3)),
         reason: (cfg.reason || '').trim() || REASON_DEFAULT,
         absRaw: raw,
-        absNames: raw.map(norm)
+        absNames: raw.map(norm),
+        reportOnly: !!cfg.reportOnly
       };
       start();
       return true;
