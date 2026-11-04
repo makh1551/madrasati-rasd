@@ -950,12 +950,13 @@
       var rows = function (title, color, items, render) {
         if (!items.length) return;
         section(title, color, items.length);
+        var more = items.length - 30; if (more > 0) items = items.slice(0, 30).concat([{ __more: more }]);
         var h = 20 + items.length * 52;
         rr(P, y, Wd - 2 * P, h, 16, C.card, C.line);
         items.forEach(function (r, i) {
           var ry = y + 20 + i * 52;
           if (i) { g.fillStyle = '#f1f5f9'; g.fillRect(P + 20, ry, Wd - 2 * P - 40, 2); }
-          render(r, ry + 34);
+          if (r.__more) txt('و ' + r.__more + ' آخرون…', Wd - P - 24, ry + 34, 20, C.mut, 'normal'); else render(r, ry + 34);
         });
         y += h + 46;
       };
@@ -968,7 +969,7 @@
       rows('غياب جزئي — حضر ثم غاب', '#f59e0b', e.partial, function (r, ly) {
         txt(shortName(r.n), Wd - P - 24, ly, 22, C.ink);
         txt(shortCls(r.c), Wd - P - 420, ly, 20, C.mut, 'normal');
-        txt('حاضر ح⁦' + r.f + '⁩  ←  ' + CAT_AR[r.x] + ' ح⁦' + r.a + '⁩', P + 24, ly, 20, C.warn, 'bold', 'left');
+        txt('حاضر الحصة ⁦' + r.f + '⁩  ←  ' + CAT_AR[r.x] + ' الحصة ⁦' + r.a + '⁩', P + 24, ly, 19, C.warn, 'bold', 'left');
       });
       var tk = Object.keys(e.teachers).sort(function (a, b) { return e.teachers[b] - e.teachers[a]; });
       if (tk.length) {
