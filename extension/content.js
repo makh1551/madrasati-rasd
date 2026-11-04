@@ -71,6 +71,9 @@
     '.cnt{font-size:14px;color:#38bdf8;font-weight:700}.nm{flex:1;min-width:0;background:#0f172a;color:#e2e8f0;border:1px solid #475569;border-radius:8px;padding:8px 10px;font-size:15px}.del{background:none;border:0;color:#64748b;font-size:22px;width:36px;height:36px;cursor:pointer}' +
     '.rep{width:100%;min-height:50px;border:1.5px solid #334155;border-radius:14px;background:#1e293b;color:#e2e8f0;font-size:15.5px;font-weight:700;cursor:pointer}' +
     '.res{border:1.5px solid #f59e0b;background:rgba(245,158,11,.08);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px;font-size:15px;color:#fde68a}.res .qp button{font-weight:700;font-size:15.5px}' +
+    '.lock{width:100%;min-height:58px;border:0;border-radius:14px;background:linear-gradient(135deg,#7c3aed,#0284c7);color:#fff;font-size:17.5px;font-weight:700;cursor:pointer;box-shadow:0 8px 22px rgba(124,58,237,.35)}.lock small{display:block;font-size:12.5px;font-weight:normal;opacity:.9;margin-top:2px}' +
+    '.ck{display:flex;align-items:flex-start;gap:10px;font-size:15px;cursor:pointer}.ck input{width:20px;height:20px;margin:2px 0 0;flex-shrink:0}.ck small{display:block;color:#94a3b8;font-size:12.5px;margin-top:2px}' +
+    '.lnk{background:none;border:0;color:#38bdf8;font-size:15px;padding:8px 0;cursor:pointer;text-align:center}' +
     '.go:disabled{opacity:.6}.msg{font-size:14px;line-height:1.6;color:#94a3b8;min-height:20px}.msg.err{color:#f87171}' +
     '</style>' +
     '<button class="fab" type="button" id="fab" aria-label="رصد الحضور السريع"><span aria-hidden="true">⚡</span><span>رصد</span></button>';
@@ -101,7 +104,7 @@
   }
 
   async function open() {
-    var st = await store.get(['mode', 'names', 'namesDay', 'speed', 'schools']);
+    var st = await store.get(['mode', 'names', 'namesDay', 'speed', 'schools', 'copy']);
     current = window.__smEngine && window.__smEngine.detectSchool ? window.__smEngine.detectSchool() : null;
     schools = Array.isArray(st.schools) ? st.schools : [];
     if (current) {
@@ -122,19 +125,22 @@
       '<div class="hd"><div><b>⚡ رصد الحضور السريع</b><small>يوم، أيام مختارة، أو أسبوع كامل</small></div><button class="x" type="button" id="x" aria-label="إغلاق">×</button></div>' +
       '<div class="bd">' +
       '<div class="res" id="res" style="display:none"><div id="resT"></div><div class="qp"><button type="button" id="resGo">▶️ أكمل الرصد</button><button type="button" id="resNo">تجاهل</button></div></div>' +
+      '<button class="lock" type="button" id="lock">🔒 إقفال اليوم<small>فحص اليوم ← نسخ الغياب من الحصص المرصودة ← رصد ← صورة تقرير اليوم</small></button>' +
       '<label class="opt" id="oAll"><input type="radio" name="m" value="all"> ✅ جميع الطلاب حاضرون</label>' +
       '<label class="opt" id="oAbs"><input type="radio" name="m" value="abs"> ⚠️ يوجد غياب</label>' +
-      '<div id="absBox" style="display:none"><div class="hint">اسم كل غائب في سطر (الاسم الأول واسم الأب على الأقل):</div><textarea id="names"></textarea></div>' +
+      '<div id="absBox" style="display:none"><div class="hint">اسم كل غائب في سطر (الاسم الأول واسم الأب على الأقل)، أو الصق كشف غياب نور الصباحي كما هو:</div><textarea id="names"></textarea></div>' +
       '<div class="sec"><div class="row"><span class="lbl">الأسبوع:</span><select id="week">' + weekOptions() + '</select></div>' +
       '<div class="days" id="days"></div>' +
       '<div class="qp"><button type="button" id="pT">اليوم فقط</button><button type="button" id="pA">هذا الأسبوع كامل</button></div>' +
       '<div class="qp"><button type="button" id="p4">آخر 4 أسابيع</button><button type="button" id="p10">آخر 10 أسابيع</button><button type="button" id="pN">إلغاء الكل</button></div>' +
       '<div class="cnt" id="cnt"></div></div>' +
       '<div class="sec"><div class="lbl">المدارس:</div><div id="sch"></div></div>' +
+      '<label class="ck"><input type="checkbox" id="copy"><span>🧠 نسخ الغياب من الحصص المرصودة في اليوم نفسه<small>الغائب في حصة رصدها المعلم يُرصد غائباً في حصص فصله غير المرصودة، والمتأخر حاضراً. تظهر الاستثناءات في «خريطة الغياب» قبل الحفظ.</small></span></label>' +
       '<div class="sec"><div class="row"><span class="lbl">السرعة:</span><select id="speed"><option value="1">عادية (حصة بحصة)</option><option value="2">سريعة (حصتان معاً)</option><option value="3">أسرع (3 حصص معاً)</option><option value="4">قصوى (4 حصص معاً)</option></select></div></div>' +
       '<div class="msg" id="msg"></div>' +
       '<button class="go" type="button" id="go">🔍 فحص ومعاينة ثم رصد</button>' +
       '<button class="rep" type="button" id="rep">📊 فحص وتقرير فقط (بدون رصد)</button>' +
+      '<button class="lnk" type="button" id="log">📅 سجل الأيام والتقرير الأسبوعي</button>' +
       '</div></div>';
     root.appendChild(panel);
     $('fab').style.display = 'none';
@@ -142,6 +148,10 @@
     root.querySelector('input[name=m][value="' + mode + '"]').checked = true;
     $('names').value = names;
     $('speed').value = st.speed || '3';
+    $('copy').checked = st.copy !== false;
+    $('copy').onchange = function () { store.set({ copy: $('copy').checked }); };
+    $('lock').onclick = function () { go(false, true); };
+    $('log').onclick = function () { if (window.__smEngine && window.__smEngine.showLog) { close(); window.__smEngine.showLog(); } };
     paintMode(); renderDays(); renderSchools();
 
     panel.addEventListener('click', function (e) { if (e.target === panel) close(); });
@@ -215,19 +225,20 @@
   }
   function say(t, err) { var m = $('msg'); m.textContent = t; m.className = 'msg' + (err ? ' err' : ''); }
 
-  function go(reportOnly) {
+  function go(reportOnly, closing) {
     save();
     var m = mode();
-    var names = $('names').value.split(/\n|،|,/).map(function (x) { return x.trim(); }).filter(function (x) { return x.length > 1; });
-    if (!reportOnly && m === 'abs' && !names.length) return say('اكتب أسماء الغائبين، أو اختر «جميع الطلاب حاضرون».', true);
-    var dates = Object.keys(selected).filter(function (k) { return selected[k] && k <= TODAY; }).sort();
+    var names = $('names').value.split(/\n/).map(function (x) { return x.trim(); }).filter(function (x) { return x.length > 1; });
+    if (!reportOnly && !closing && m === 'abs' && !names.length) return say('اكتب أسماء الغائبين، أو اختر «جميع الطلاب حاضرون».', true);
+    var dates = closing ? [TODAY] : Object.keys(selected).filter(function (k) { return selected[k] && k <= TODAY; }).sort();
     if (!dates.length) return say('اختر يوماً واحداً على الأقل.', true);
     var chosen = schools.filter(function (s) { return s.on; }).map(function (s) { return { id: s.id, name: s.name }; });
     if (schools.length && !chosen.length) return say('اختر مدرسة واحدة على الأقل.', true);
     if (!window.__smEngine) return say('لم يُحمَّل محرك الرصد. حدّث الصفحة وحاول مجدداً.', true);
     try {
       var ok = window.__smEngine.open({ mode: m, names: names, dates: dates, schools: chosen,
-        currentSchoolId: current && current.id, concurrency: parseInt($('speed').value, 10), reportOnly: !!reportOnly });
+        currentSchoolId: current && current.id, concurrency: parseInt($('speed').value, 10), reportOnly: !!reportOnly,
+        copy: $('copy').checked, closing: !!closing });
       if (ok !== false) close();
     } catch (e) { say('حدث خطأ: ' + (e && e.message || e), true); }
   }

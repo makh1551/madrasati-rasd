@@ -20,6 +20,7 @@
   #absBox{display:none;margin-bottom:10px}
   button{width:100%;border:none;border-radius:8px;padding:11px;font:inherit;font-weight:bold;cursor:pointer}
   #quick{background:var(--ok);color:#fff;font-size:14px;margin-top:4px}
+  #lock{background:linear-gradient(135deg,#7c3aed,#0284c7);color:#fff;font-size:14px;margin-bottom:10px}
   #open{background:var(--line);color:var(--txt);margin-top:8px;font-weight:normal}
   button:disabled{opacity:.55;cursor:default}
   #status{margin-top:10px;min-height:18px;font-size:12px;color:var(--mut);line-height:1.6}
@@ -71,10 +72,11 @@
   <button id="close" type="button" aria-label="إغلاق">×</button>
 </header>
 <main>
+  <button id="lock" type="button">🔒 إقفال اليوم</button>
   <label class="opt" id="optAll"><input type="radio" name="mode" value="all"> ✅ جميع الطلاب حاضرون</label>
   <label class="opt" id="optAbs"><input type="radio" name="mode" value="abs"> ⚠️ يوجد غياب</label>
   <div id="absBox">
-    <div class="hint">اسم كل غائب في سطر (الاسم الأول واسم الأب على الأقل):</div>
+    <div class="hint">اسم كل غائب في سطر، أو الصق كشف غياب نور كما هو:</div>
     <textarea id="names" placeholder="مثال:&#10;محمد أحمد&#10;خالد سعد"></textarea>
   </div>
   <div class="sec">
@@ -107,6 +109,7 @@
       <option value="4">قصوى (4 حصص معاً)</option>
     </select>
   </div>
+  <label class="opt"><input type="checkbox" id="copy" checked> 🧠 نسخ الغياب من الحصص المرصودة في اليوم نفسه</label>
   <button id="quick">🔍 فحص ومعاينة ثم رصد</button>
   <button id="open">فتح اللوحة التفصيلية (الأداة الأصلية)</button>
   <div id="status"></div>

@@ -183,17 +183,18 @@ async function prepare(m, names) {
   return tab;
 }
 
-async function start(quick) {
+async function start(quick, closing) {
   save();
   var m = mode(), names = namesList();
-  if (m === 'abs' && !names.length) { status('اكتب أسماء الغائبين، أو اختر «جميع الطلاب حاضرون».', 'err'); return; }
+  if (quick) names = $('names').value.split(/\n/).map(function (x) { return x.trim(); }).filter(function (x) { return x.length > 1; });
+  if (!closing && m === 'abs' && !names.length) { status('اكتب أسماء الغائبين، أو اختر «جميع الطلاب حاضرون».', 'err'); return; }
   busy(true);
   try {
     if (!quick) {
       await prepare(m, names);
       status('تم فتح اللوحة التفصيلية في الصفحة.', 'ok'); closeUI(); return;
     }
-    var days = chosenDates();
+    var days = closing ? [{ date: TODAY }] : chosenDates();
     if (!days.length) { status('اختر يوماً واحداً على الأقل.', 'err'); return; }
     var schools = chosenSchools();
     if (!schools.length && schoolList.length) { status('اختر مدرسة واحدة على الأقل.', 'err'); return; }
@@ -204,7 +205,8 @@ async function start(quick) {
     await run(tab.id, {
       func: function (cfg) { return window.__smEngine.open(cfg); },
       args: [{ mode: m, names: names, dates: days.map(function (d) { return d.date; }), schools: schools,
-               currentSchoolId: cur && cur.id, concurrency: parseInt($('speed').value, 10) }]
+               currentSchoolId: cur && cur.id, concurrency: parseInt($('speed').value, 10),
+               copy: $('copy').checked, closing: !!closing }]
     });
     chrome.storage.local.set({ speed: $('speed').value });
     closeUI();
@@ -258,5 +260,8 @@ document.querySelectorAll('input[name=mode]').forEach(function (r) { r.onchange 
 $('names').oninput = save;
 if ($('close')) $('close').onclick = closeUI;
 $('quick').onclick = function () { start(true); };
+$('lock').onclick = function () { start(true, true); };
+chrome.storage.local.get(['copy'], function (r) { $('copy').checked = r.copy !== false; });
+$('copy').onchange = function () { chrome.storage.local.set({ copy: $('copy').checked }); };
 $('open').onclick = function () { start(false); };
 loadSchools();

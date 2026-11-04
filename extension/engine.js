@@ -122,7 +122,9 @@
         var href = (aDir && aDir.getAttribute('href')) || (aView && aView.getAttribute('href')) || '';
         var g = function (k) { var m = href.match(new RegExp(k + '=([^&]+)', 'i')); return m ? m[1] : ''; };
         var a0 = td.querySelector('a');
-        var title = (a0 && a0.textContent.trim()) || t.replace(/(لم يتم الرصد|تم الرصد|رصد الحضور|عرض الحضور)/g, '').trim() || ('حصة ' + slot);
+        var at = a0 ? a0.textContent.trim() : '';
+        if (/^(عرض الحضور|رصد الحضور|تم الرصد|لم يتم الرصد|عرض|رصد)$/.test(at)) at = '';
+        var title = at || t.replace(/(لم يتم الرصد|تم الرصد|رصد الحضور|عرض الحضور)/g, '').trim() || ('حصة ' + slot);
         var info = t.replace(/(لم يتم الرصد|تم الرصد|رصد الحضور|عرض الحضور)/g, '').replace(title, '').replace(/\s+/g, ' ').trim();
         out.push({
           school: school, classroom: c.name, numericClassId: id, encClassId: c.encId,
@@ -135,8 +137,34 @@
     return out;
   }
 
-  /* ================= رصد حصة واحدة ================= */
-  async function recordOne(p, reason, absNames, stats) {
+  /* ================= نموذج الرصد: فتح، قراءة الحالات، الحفظ ================= */
+  var SEL_FORM = 'form#SaveAttendStudents, form#UpdateAttendStudents, form[action*="SaveAttendStudents"]';
+  var CAT_AR = { present: 'حاضر', absent: 'غائب', excused: 'غائب بعذر', late: 'متأخر', permit: 'مستأذن', escape: 'هارب' };
+  function catOf(label) {
+    var t = norm(label);
+    if (!t) return null;
+    if (t.indexOf('هارب') > -1 || t.indexOf('هروب') > -1) return 'escape';
+    if (t.indexOf('مستاذن') > -1 || t.indexOf('استيذان') > -1 || t.indexOf('استئذان') > -1) return 'permit';
+    if (t.indexOf('عذر') > -1) return 'excused';
+    if (t.indexOf('متاخر') > -1 || t.indexOf('تاخير') > -1) return 'late';
+    if (t.indexOf('غايب') > -1 || t.indexOf('غياب') > -1) return 'absent';
+    if (t.indexOf('حاضر') > -1 || t.indexOf('حضور') > -1) return 'present';
+    return null;
+  }
+  // مطابقة اسم (من القائمة اليدوية أو كشف نور) مع نص صف الطالب
+  function nameHit(rowNorm, name, key) {
+    if (!name) return false;
+    if (rowNorm.indexOf(name) > -1) return true;
+    var rw = ' ' + rowNorm + ' ', tk = name.split(' ').slice(0, 4);
+    if (tk.length >= 2 && tk.every(function (w) { return rw.indexOf(' ' + w + ' ') > -1; })) return true;
+    // اسم أقصر/أطول من اسم المنصة: تطابق البداية، ومع الأسماء الرباعية يلزم تطابق اسم العائلة
+    var a = name.split(' '), b = (key || rowNorm).split(' '), k = Math.min(a.length, b.length, 3);
+    if (k < 2) return false;
+    for (var i = 0; i < k; i++) if (a[i] !== b[i]) return false;
+    return a.length < 4 || b.length < 4 || a[a.length - 1] === b[b.length - 1];
+  }
+
+  async function resolveHref(p) {
     if (!p.idSchedule) throw new Error('معرف الحصة غير متوفر');
     var sid = p.school.id, href = p.href || '';
     if (href.indexOf('/AttendStudents/View') > -1) {
@@ -144,6 +172,7 @@
         var rv = await fetch(href, { credentials: 'include', headers: { Accept: 'text/html', 'X-Requested-With': 'XMLHttpRequest' } });
         if (rv.ok) {
           var tv = await rv.text(), dv = new DOMParser().parseFromString(tv, 'text/html');
+          p._viewDoc = dv;
           var ad = dv.querySelector('a[href*="/AttendStudents/IndexDirector"]');
           if (ad) href = ad.getAttribute('href');
           else {
@@ -160,11 +189,15 @@
         '&dateAttend=' + encodeURIComponent(p.dateAttendTicks || '') + '&teacherId=' + encodeURIComponent(p.teacherId || '') +
         '&lectureClassId=' + encodeURIComponent(p.lectureClassId || '');
     }
+    return href;
+  }
+
+  async function loadForm(p) {
+    var sid = p.school.id, href = await resolveHref(p);
     var r = await fetch(href, { credentials: 'include', headers: { Accept: 'text/html,application/xhtml+xml' } });
     if (!r.ok) throw new Error('تعذر فتح صفحة الرصد (' + r.status + ')');
     var page = await r.text(), doc = new DOMParser().parseFromString(page, 'text/html');
-    var SEL = 'form#SaveAttendStudents, form#UpdateAttendStudents, form[action*="SaveAttendStudents"]';
-    var form = doc.querySelector(SEL);
+    var form = doc.querySelector(SEL_FORM);
     if (!form) {
       var v = function (k) { var m = page.match(new RegExp('var\\s+' + k + '\\s*=\\s*[\'"]([^\'"]*)[\'"]', 'i')); return m ? m[1] : ''; };
       var mu = page.match(/var\s+getAttendStudentsUrl\s*=\s*['"]([^'"]+)['"]/i);
@@ -181,32 +214,82 @@
       if (r2.ok) {
         var t2 = await r2.text(), h2 = t2;
         try { var j2 = JSON.parse(t2); h2 = j2.html || (typeof j2 === 'string' ? j2 : ''); } catch (e) {}
-        if (h2) { var d2 = new DOMParser().parseFromString(h2, 'text/html'); var f2 = d2.querySelector(SEL); if (f2) { form = f2; doc = d2; } }
+        if (h2) { var d2 = new DOMParser().parseFromString(h2, 'text/html'); var f2 = d2.querySelector(SEL_FORM); if (f2) { form = f2; doc = d2; } }
       }
     }
     if (!form) throw new Error('لم يُعثر على نموذج الرصد');
+    return { form: form, doc: doc };
+  }
 
-    var body = new URLSearchParams(), seen = new Set(), localAbs = {}, localNo = 0;
-    var ABS = norm('غائب'), EXC = norm('عذر');
+  function optLabel(form, x) {
+    var l = x.id && form.querySelector('label[for="' + CSS.escape(x.id) + '"]');
+    return (l && l.textContent) || (x.closest('label') && x.closest('label').textContent) || (x.nextSibling && x.nextSibling.textContent) || x.title || x.getAttribute('data-title') || '';
+  }
+  function isStatusGroup(n) { return /\.AttendStatusId$/.test(n) || n.indexOf('Attend[') === 0; }
+  // صفوف الطلاب في النموذج: اسم الطالب، مفتاح المطابقة، الخيارات وتصنيفها، والحالة المختارة حالياً
+  function studentRows(form) {
+    var groups = {}, order = [];
+    form.querySelectorAll('input[type=radio]').forEach(function (x) {
+      if (!x.name || !isStatusGroup(x.name)) return;
+      if (!groups[x.name]) { groups[x.name] = []; order.push(x.name); }
+      groups[x.name].push(x);
+    });
+    return order.map(function (n) {
+      var opts = groups[n].map(function (x) { var lb = optLabel(form, x); return { value: x.value, label: lb, cat: catOf(lb) || (x.value === '0' ? 'present' : null), checked: x.checked || x.hasAttribute('checked') }; });
+      var row = groups[n][0].closest('tr') || groups[n][0].closest('.student-row, .row, li') || groups[n][0].parentElement;
+      var txt = row ? row.textContent : '';
+      opts.map(function (o) { return (o.label || '').trim(); }).filter(Boolean).sort(function (a, b) { return b.length - a.length; }).forEach(function (l) { txt = txt.split(l).join(' '); });
+      txt = txt.replace(/(غائب بعذر|بعذر|غائب|حاضر|متأخر|مستأذن|هارب)/g, ' ');
+      var raw = txt.replace(/[0-9\u0660-\u0669]+/g, ' ').replace(/[^\u0600-\u06FF\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      raw = raw.split(' ').slice(0, 5).join(' ');
+      var ck = opts.find(function (o) { return o.checked; });
+      return { group: n, raw: raw, key: norm(raw), rowNorm: norm(row ? row.textContent : ''), opts: opts, cat: ck ? (ck.cat || 'present') : null };
+    }).filter(function (s) { return s.key.length > 1; });
+  }
+  // قراءة حالات الطلاب من حصة مرصودة (النموذج أولاً، ثم صفحة العرض احتياطاً)
+  async function readStatuses(p) {
+    var f = await loadForm(p), rows = studentRows(f.form);
+    if (rows.some(function (r) { return r.cat; })) return rows;
+    var dv = p._viewDoc;
+    if (dv) {
+      var out = [];
+      dv.querySelectorAll('tr').forEach(function (tr) {
+        var t = tr.textContent || '', c = null, lab = '';
+        ['هارب', 'مستأذن', 'غائب بعذر', 'بعذر', 'متأخر', 'غائب', 'حاضر'].some(function (w) { if (t.indexOf(w) > -1) { c = catOf(w); lab = w; return true; } return false; });
+        if (!c) return;
+        var raw = t.split(lab).join(' ').replace(/[0-9\u0660-\u0669]+/g, ' ').replace(/[^\u0600-\u06FF\s]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 5).join(' ');
+        if (norm(raw).length > 1) out.push({ raw: raw, key: norm(raw), cat: c });
+      });
+      if (out.length) return out;
+    }
+    return rows.map(function (r) { r.cat = r.cat || 'present'; return r; });
+  }
+
+  // رصد حصة: decide(student) تُرجع التصنيف المطلوب (present/absent/excused/...)
+  async function recordOne(p, reason, decide, stats) {
+    var f = await loadForm(p), form = f.form, doc = f.doc;
+    var body = new URLSearchParams(), seen = new Set(), local = [], localNo = 0, localAbs = {};
+    var rows = studentRows(form), byGroup = {};
+    rows.forEach(function (s) { byGroup[s.group] = s; });
     form.querySelectorAll('input').forEach(function (inp) {
       var n = inp.name, ty = (inp.type || '').toLowerCase();
       if (!n) return;
       if (ty === 'hidden' || ty === 'text') { body.append(n, inp.value || ''); return; }
       if (ty !== 'radio' || seen.has(n)) return;
       seen.add(n);
-      if (/\.AttendStatusId$/.test(n) || n.indexOf('Attend[') === 0) {
-        var val = '0';
-        if (absNames.length) {
-          var row = inp.closest('tr'), rt = row ? norm(row.textContent) : '';
-          var hit = absNames.find(function (x) { return rt.indexOf(x) > -1; });
-          if (hit) {
-            var opts = Array.from(form.querySelectorAll('input[type=radio]')).filter(function (x) { return x.name === n; });
-            var lab = function (x) {
-              var l = x.id && form.querySelector('label[for="' + CSS.escape(x.id) + '"]');
-              return norm((l && l.textContent) || (x.closest('label') && x.closest('label').textContent) || (x.nextSibling && x.nextSibling.textContent) || x.title || '');
-            };
-            var ab = opts.find(function (x) { var t = lab(x); return t.indexOf(ABS) > -1 && t.indexOf(EXC) < 0; }) || opts.find(function (x) { return lab(x).indexOf(ABS) > -1; });
-            if (ab) { val = ab.value; localAbs[hit] = (localAbs[hit] || 0) + 1; } else localNo++;
+      if (isStatusGroup(n)) {
+        var s = byGroup[n], val = '0';
+        var pres = s && s.opts.find(function (o) { return o.cat === 'present'; });
+        if (pres) val = pres.value;
+        if (s) {
+          var want = decide(s) || 'present';
+          if (want.cat) { if (want.hit) localAbs[want.hit] = 1; want = want.cat; }
+          if (want !== 'present') {
+            var fb = { excused: ['excused', 'absent'], permit: ['permit', 'absent'], escape: ['escape', 'absent'], absent: ['absent'], late: ['late', 'present'] }[want] || [want];
+            var o = null;
+            for (var i = 0; i < fb.length && !o; i++) o = s.opts.find(function (x) { return x.cat === fb[i]; });
+            if (o) { val = o.value; if (o.cat !== 'present') local.push({ key: s.key, raw: s.raw, cat: o.cat }); }
+            else localNo++;
           }
         }
         body.append(n, val);
@@ -229,10 +312,98 @@
     try { js = JSON.parse(rt); } catch (e) {}
     var ok = (rs.ok || rs.redirected) && (!js || ((js.result || {}).status !== false && js.status !== false));
     if (!ok) throw new Error((js && ((js.result || {}).msg || js.msg)) || ('رمز ' + rs.status));
-    Object.keys(localAbs).forEach(function (k) { stats.absent[k] = (stats.absent[k] || 0) + localAbs[k]; });
+    Object.keys(localAbs).forEach(function (k) { stats.absent[k] = (stats.absent[k] || 0) + 1; });
     stats.noAbsentOption += localNo;
+    p.marked = local;
     p.isRecorded = true;
+    p.byTool = true;
     return true;
+  }
+
+  /* ================= نسخ الغياب من الحصص المرصودة في اليوم نفسه ================= */
+  // مجموعة = مدرسة + فصل + يوم
+  function gkey(p) { return p.school.id + '|' + p.classroom + '|' + p.dateStr; }
+  async function buildGroups(onlyKeys) {
+    var cfg = S.cfg, G = {};
+    S.periods.forEach(function (p) {
+      var k = gkey(p), g = G[k] = G[k] || { k: k, school: p.school, classroom: p.classroom, dateStr: p.dateStr, dayName: p.dayName, recs: [], targets: [], roster: {}, edits: {}, partial: [], src: null };
+      (p.isRecorded ? g.recs : g.targets).push(p);
+    });
+    var need = Object.keys(G).filter(function (k) { return (G[k].targets.length || cfg.closing) && (!onlyKeys || onlyKeys[k]); });
+    var reads = [];
+    need.forEach(function (k) { G[k].recs.forEach(function (p) { reads.push(p); }); });
+    var done = 0;
+    if (cfg.copy && reads.length) {
+      await pool(reads, Math.min(6, cfg.concurrency + 2), async function (p) {
+        for (var t = 0; t < 2; t++) {
+          try { p.statuses = await readStatuses(p); break; } catch (e) { p.statuses = null; if (!t) await sleep(700); }
+        }
+        progress(++done, reads.length, 'قراءة الحصص المرصودة');
+      });
+    }
+    need.forEach(function (k) {
+      var g = G[k];
+      g.recs.sort(function (a, b) { return a.slot - b.slot; });
+      var srcs = g.recs.filter(function (p) { return p.statuses && p.statuses.length; });
+      g.src = srcs.length ? srcs : null;
+      srcs.forEach(function (p) { p.statuses.forEach(function (s) { g.roster[s.key] = g.roster[s.key] || s.raw; }); });
+      // الغياب الجزئي: حاضر في حصة مبكرة ثم غائب/هارب/مستأذن في حصة لاحقة
+      Object.keys(g.roster).forEach(function (key) {
+        var seenPresent = null;
+        srcs.forEach(function (p) {
+          var s = p.statuses.find(function (x) { return x.key === key; }); if (!s) return;
+          if (s.cat === 'present' || s.cat === 'late') { if (!seenPresent) seenPresent = p; }
+          else if (seenPresent && ['absent', 'escape', 'permit'].indexOf(s.cat) > -1 && !g.partial.some(function (x) { return x.key === key; }))
+            g.partial.push({ key: key, raw: g.roster[key], from: seenPresent.slot, at: p.slot, cat: s.cat });
+        });
+      });
+    });
+    S.groups = G;
+    return G;
+  }
+  // الحالة المقترحة لطالب في حصة غير مرصودة
+  function planCat(g, t, key) {
+    if (g.edits[key]) return g.edits[key];
+    if (!g.src) return 'present';
+    var before = g.src.filter(function (p) { return p.slot < t.slot; }), base = before.length ? before[before.length - 1] : g.src[0];
+    var s = base.statuses.find(function (x) { return x.key === key; });
+    if (!s) return 'present';
+    var c = s.cat;
+    if (c === 'late') return 'present';
+    if ((c === 'permit' || c === 'escape') && !(base.slot < t.slot)) return 'present';
+    if (c === 'permit' || c === 'escape') return 'absent';
+    return c || 'present';
+  }
+  // حالة الطالب في اليوم (للخريطة والسجل): أول حصة مرصودة أو التعديل اليدوي
+  function dayCat(g, key) {
+    if (g.edits[key]) return g.edits[key];
+    var manual = S.cfg.absNames.find(function (n) { return nameHit(key, n, key); });
+    if (manual) return 'absent';
+    if (!g.src) return 'present';
+    var first = g.src[0].statuses.find(function (x) { return x.key === key; });
+    var c = first ? first.cat : 'present';
+    return c === 'late' ? 'present' : c;
+  }
+  // خطة كل حصة مستهدفة تُحفظ معها (تُستخدم في الاستئناف أيضاً)
+  function attachPlans(list) {
+    var G = S.groups || {};
+    list.forEach(function (p) {
+      var g = G[gkey(p)], plan = {};
+      if (!g) return;
+      Object.keys(Object.assign({}, g.roster, g.edits)).forEach(function (key) { var c = planCat(g, p, key); if (c !== 'present') plan[key] = c; });
+      p.plan = plan;
+    });
+  }
+  function deciderFor(p) {
+    var cfg = S.cfg;
+    return function (s) {
+      var hit = cfg.absNames.find(function (n) { return nameHit(s.rowNorm || s.key, n, s.key); });
+      if (hit) return { cat: 'absent', hit: hit };
+      var pl = p.plan || {};
+      if (pl[s.key]) return pl[s.key];
+      var k2 = Object.keys(pl).find(function (k) { return nameHit(s.rowNorm || s.key, k, s.key); });
+      return k2 ? pl[k2] : 'present';
+    };
   }
 
   /* ================= الجوال: إبقاء الشاشة مضاءة، تنبيه الانتهاء، الاستئناف ================= */
@@ -264,7 +435,7 @@
       if (!items.length) { localStorage.removeItem(RKEY); return; }
       var c = S.cfg;
       localStorage.setItem(RKEY, JSON.stringify({ at: Date.now(), cfg: { dates: c.dates, schools: c.schools, concurrency: c.concurrency, reason: c.reason, absRaw: c.absRaw, absNames: c.absNames },
-        items: items.map(function (p) { var q = {}; for (var k in p) q[k] = p[k]; return q; }) }));
+        items: items.map(function (p) { var q = {}; for (var k in p) if (k[0] !== '_' && k !== 'statuses') q[k] = p[k]; return q; }) }));
     } catch (e) {}
   }
   function rLoad() {
@@ -273,7 +444,7 @@
   }
 
   /* ================= الواجهة ================= */
-  var S = { cfg: null, periods: [], scanErrors: [], busy: false, stats: null, failed: [] };
+  var S = { cfg: null, periods: [], scanErrors: [], busy: false, stats: null, failed: [], groups: {} };
   var root, $ = function (id) { return document.getElementById(id); };
 
   function css() {
@@ -299,7 +470,12 @@
       '#sme .go{background:#10b981;color:#fff}#sme .sec{background:#334155;color:#e2e8f0}#sme .pic{background:#0284c7;color:#fff}#sme button:disabled{opacity:.5;cursor:default}' +
       '#sme .sum{width:100%;margin:6px 0 12px;font-size:12.5px}#sme .sum td,#sme .sum th{padding:6px 8px;border-bottom:1px solid #1e293b;text-align:right}#sme .sum th{color:#94a3b8;font-weight:600}#sme .sum .n{font-variant-numeric:tabular-nums}' +
       '#sme .flt{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 8px}#sme .flt input,#sme .flt select{flex:1 1 160px;min-width:0;background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:8px;padding:9px 10px;font:inherit;font-size:14px}' +
-      '#sme .msg{text-align:center;padding:60px 20px;color:#94a3b8}#sme .msg h4{color:#f8fafc;margin:0 0 6px}';
+      '#sme .msg{text-align:center;padding:60px 20px;color:#94a3b8}#sme .msg h4{color:#f8fafc;margin:0 0 6px}' +
+      '#sme .s{color:#94a3b8;font-size:11.5px}#sme .warn{color:#fbbf24}#sme .map{margin:4px 0 10px}#sme .mapt{color:#f8fafc;font-weight:700;font-size:14px;margin:6px 0}#sme .mapt small{color:#94a3b8;font-weight:normal}' +
+      '#sme .mg{border:1px solid #334155;border-radius:10px;padding:8px 10px;margin:6px 0;background:#111827}#sme .mh{margin-bottom:3px}#sme .nr{padding:6px 0;border-top:1px solid #1e293b}#sme summary{cursor:pointer}' +
+      '#sme .st{display:inline-block;padding:6px 11px;border-radius:999px;margin:4px 3px;cursor:pointer;font-size:12.5px;border:1px solid;user-select:none}' +
+      '#sme .c-absent{color:#fca5a5;border-color:#ef4444;background:rgba(239,68,68,.12)}#sme .c-excused{color:#c4b5fd;border-color:#8b5cf6;background:rgba(139,92,246,.12)}#sme .c-escape,#sme .c-permit{color:#fcd34d;border-color:#f59e0b;background:rgba(245,158,11,.12)}#sme .c-late{color:#93c5fd;border-color:#3b82f6}#sme .c-present{color:#94a3b8;border-color:#475569;text-decoration:line-through}' +
+      '#sme .part{margin-top:4px;color:#fbbf24;font-size:12px}#sme select.sme-add{background:#1e293b;color:#e2e8f0;border:1px dashed #64748b;border-radius:999px;padding:6px 10px;font:inherit;font-size:12.5px;margin:4px 3px;max-width:220px}#sme button.sm{padding:6px 12px;font-size:12.5px;border-radius:999px;margin:4px 3px}';
     document.head.appendChild(st);
   }
   function shell() {
@@ -376,7 +552,7 @@
         var w = wk[k] = wk[k] || { ws: ws, total: 0, un: 0 };
         w.total++; if (!p.isRecorded) w.un++;
       });
-      var html = '<table class="sum"><tr><th>الأسبوع</th><th>غير مرصود</th><th>كل الحصص</th><th>الإنجاز</th></tr>' +
+      var html = '<div id="sme-map" class="map"></div><table class="sum"><tr><th>الأسبوع</th><th>غير مرصود</th><th>كل الحصص</th><th>الإنجاز</th></tr>' +
         Object.keys(wk).sort().reverse().map(function (k) {
           var w = wk[k], e = new Date(w.ws.getFullYear(), w.ws.getMonth(), w.ws.getDate() + 4), pc = Math.round((w.total - w.un) / w.total * 100);
           return '<tr><td>' + w.ws.getDate() + '/' + (w.ws.getMonth() + 1) + ' – ' + e.getDate() + '/' + (e.getMonth() + 1) + '</td><td class="n" style="color:' + (w.un ? '#f87171' : '#34d399') + '">' + w.un + '</td><td class="n">' + w.total + '</td><td class="n">' + pc + '%</td></tr>';
@@ -398,6 +574,7 @@
           '<td><b>' + esc(p.classroom) + '</b></td><td class="s">الحصة ' + p.slot + '</td><td>' + esc(p.title) + '</td><td class="s">' + esc(p.info) + '</td></tr>';
       });
       body.innerHTML = html + '</table>';
+      renderMap();
       body.querySelectorAll('.sme-g').forEach(function (g) {
         g.onchange = function () { body.querySelectorAll('.sme-c[data-k="' + g.dataset.k + '"]').forEach(function (c) { c.checked = g.checked; }); count(); };
       });
@@ -422,9 +599,11 @@
       }).join('') + '</table>';
     }
     foot.innerHTML =
-      (un.length && !S.cfg.reportOnly ? '<button class="b go" id="sme-go">⚡ رصد المحدد (<span id="sme-n">0</span>)</button>' +
+      (un.length && !S.cfg.reportOnly ? '<button class="b go" id="sme-go">' + (S.cfg.closing ? '🔒 اعتماد وإقفال اليوم' : '⚡ رصد المحدد') + ' (<span id="sme-n">0</span>)</button>' +
         '<button class="b sec" id="sme-all">تحديد الكل</button><button class="b sec" id="sme-none">إلغاء التحديد</button>' : '') +
+      (S.cfg.closing && !un.length ? '<button class="b go" id="sme-ci">🔒 صورة إقفال اليوم</button>' : '') +
       '<button class="b pic" id="sme-img">🖼️ صورة نسب الرصد</button>';
+    if (S.cfg.closing && !un.length && S.periods.length) { saveLog(); $('sme-ci').onclick = closingImage; }
     if (un.length && !S.cfg.reportOnly) {
       $('sme-go').onclick = function () { runSelected(un); };
       $('sme-all').onclick = function () { setAll(true); };
@@ -441,13 +620,265 @@
     return Array.from(body.querySelectorAll('.sme-c' + (onlyChecked ? ':checked' : ''))).filter(function (c) { var tr = c.closest('tr'); return !tr || tr.style.display !== 'none'; });
   }
 
+  /* ---------- خريطة الغياب (الاستثناءات فقط) ---------- */
+  var CYCLE = ['absent', 'excused', 'present'];
+  function exceptions(g) {
+    var keys = Object.keys(Object.assign({}, g.roster, g.edits)), out = [];
+    keys.forEach(function (key) {
+      var c = 'present';
+      if (g.edits[key]) c = g.edits[key];
+      else g.targets.some(function (t) { var x = planCat(g, t, key); if (x !== 'present') { c = x; return true; } return false; });
+      var man = S.cfg.absNames.some(function (n) { return nameHit(key, n, key); });
+      if (man && !g.edits[key]) c = 'absent';
+      if (c !== 'present' || g.edits[key]) out.push({ key: key, raw: g.roster[key] || key, cat: c, man: man });
+    });
+    return out.sort(function (a, b) { return a.raw.localeCompare(b.raw, 'ar'); });
+  }
+  function renderMap() {
+    var box = $('sme-map'); if (!box) return;
+    var G = S.groups || {}, list = Object.keys(G).map(function (k) { return G[k]; }).filter(function (g) { return g.targets.length; });
+    if (!list.length) { box.innerHTML = ''; return; }
+    list.sort(function (a, b) { return a.dateStr.localeCompare(b.dateStr) || a.classroom.localeCompare(b.classroom, 'ar'); });
+    S.mapList = list;
+    var hot = [], clean = 0, nosrc = [];
+    list.forEach(function (g, i) {
+      g.i = i; g.ex = exceptions(g);
+      if (g.ex.length || g.partial.length) hot.push(g);
+      else if (!g.src) nosrc.push(g);
+      else clean++;
+    });
+    var addCtl = function (g) {
+      var ks = Object.keys(g.roster);
+      if (!ks.length) return '<button class="b sec sm sme-load" data-g="' + g.i + '">+ غائب</button>';
+      return '<select class="sme-add" data-g="' + g.i + '"><option value="">+ إضافة غائب…</option>' +
+        ks.sort(function (a, b) { return g.roster[a].localeCompare(g.roster[b], 'ar'); }).map(function (k) { return '<option value="' + esc(k) + '">' + esc(g.roster[k]) + '</option>'; }).join('') + '</select>';
+    };
+    var srcTxt = function (g) {
+      if (!g.src) return '<span class="warn">⚠️ لا توجد حصة مرصودة لهذا الفصل في يومه — سيُرصد الكل حاضرين</span>';
+      return 'المصدر: ' + g.src.map(function (p) { return 'الحصة ' + p.slot + ' (' + esc(p.title) + ')'; }).join('، ');
+    };
+    var html = '<div class="mapt">🗺️ خريطة الغياب <small>— الاستثناءات فقط؛ اضغط على الطالب لتغيير حالته</small></div>';
+    if (!S.cfg.copy) html += '<div class="mg s">النسخ من الحصص المرصودة متوقف — الكل حاضر إلا من في قائمة الغياب.</div>';
+    hot.forEach(function (g) {
+      html += '<div class="mg"><div class="mh"><b>' + esc(g.classroom) + '</b> <span class="s">' + esc(g.dayName) + ' ' + esc(g.dateStr) + (S.cfg.schools.length > 1 ? ' — ' + esc(g.school.name) : '') + ' · ' + g.targets.length + ' حصة غير مرصودة</span></div>' +
+        '<div class="s">' + srcTxt(g) + '</div><div>' +
+        g.ex.map(function (e) { return '<span class="st c-' + e.cat + '" data-g="' + g.i + '" data-k="' + esc(e.key) + '">' + esc(e.raw) + ' · ' + CAT_AR[e.cat] + (e.man ? ' 📋' : '') + '</span>'; }).join('') +
+        addCtl(g) + '</div>' +
+        (g.partial.length ? '<div class="part">⚠️ غياب جزئي (حضر ثم غاب): ' + g.partial.map(function (x) { return esc(x.raw) + ' — حاضر ح' + x.from + ' ثم ' + CAT_AR[x.cat] + ' ح' + x.at; }).join('، ') + '</div>' : '') + '</div>';
+    });
+    if (clean) html += '<div class="mg s">✅ ' + clean + ' فصل/يوم بلا غياب في الحصص المرصودة — ستُرصد حصصها الباقية حاضرين.</div>';
+    if (nosrc.length) {
+      html += '<details class="mg"><summary class="warn">⚠️ ' + nosrc.length + ' فصل/يوم بلا أي حصة مرصودة — ستُرصد حاضرين (اضغط لإضافة غائب)</summary>' +
+        nosrc.map(function (g) { return '<div class="nr"><b>' + esc(g.classroom) + '</b> <span class="s">' + esc(g.dayName) + ' ' + esc(g.dateStr) + ' · ' + g.targets.length + ' حصة</span> ' + addCtl(g) + '</div>'; }).join('') + '</details>';
+    }
+    box.innerHTML = html;
+    var opened = box.querySelector('details'); if (opened && S.mapOpen) opened.open = true;
+    if (opened) opened.ontoggle = function () { S.mapOpen = opened.open; };
+    box.querySelectorAll('.st').forEach(function (el) {
+      el.onclick = function () {
+        if (S.busy) return;
+        var g = S.mapList[+el.dataset.g], k = el.dataset.k, cur = (g.ex.find(function (e) { return e.key === k; }) || {}).cat || 'present';
+        g.edits[k] = CYCLE[(CYCLE.indexOf(cur) + 1) % CYCLE.length];
+        renderMap();
+      };
+    });
+    box.querySelectorAll('.sme-add').forEach(function (el) {
+      el.onchange = function () { if (!el.value) return; var g = S.mapList[+el.dataset.g]; g.edits[el.value] = 'absent'; renderMap(); };
+    });
+    box.querySelectorAll('.sme-load').forEach(function (el) {
+      el.onclick = async function () {
+        var g = S.mapList[+el.dataset.g]; el.disabled = true; el.textContent = 'جاري تحميل الأسماء…';
+        try { var f = await loadForm(g.targets[0]); studentRows(f.form).forEach(function (s) { g.roster[s.key] = s.raw; }); }
+        catch (e) { alert('تعذر تحميل أسماء الطلاب: ' + e.message); }
+        renderMap();
+      };
+    });
+  }
+
+  /* ---------- سجل الأيام (محلي) ---------- */
+  var LKEY = 'smRasdLog';
+  function logLoad() { try { return JSON.parse(localStorage.getItem(LKEY) || '{}') || {}; } catch (e) { return {}; } }
+  function logSaveAll(L) {
+    var ds = Object.keys(L).sort();
+    while (ds.length > 60) delete L[ds.shift()];
+    try { localStorage.setItem(LKEY, JSON.stringify(L)); } catch (e) {}
+  }
+  function dayEntry(dateStr, sc) {
+    var ps = S.periods.filter(function (p) { return p.dateStr === dateStr && p.school.id === sc.id; });
+    var e = { name: sc.name, total: ps.length, rec: 0, admin: 0, absent: [], partial: [], teachers: {}, at: Date.now(), read: false };
+    ps.forEach(function (p) {
+      if (p.isRecorded) e.rec++;
+      if (p.byTool) { e.admin++; var t = (p.info || '').trim() || 'غير محدد'; e.teachers[t] = (e.teachers[t] || 0) + 1; }
+    });
+    var G = S.groups || {}, seen = {};
+    Object.keys(G).forEach(function (k) {
+      var g = G[k]; if (g.dateStr !== dateStr || g.school.id !== sc.id || !(g.src || Object.keys(g.edits).length)) return;
+      e.read = true;
+      Object.keys(Object.assign({}, g.roster, g.edits)).forEach(function (key) {
+        var c = dayCat(g, key);
+        if (c === 'absent' || c === 'excused' || c === 'escape' || c === 'permit') { e.absent.push({ n: g.roster[key] || key, c: g.classroom, x: c }); seen[g.classroom + '|' + key] = 1; }
+      });
+      g.partial.forEach(function (x) { e.partial.push({ n: x.raw, c: g.classroom, f: x.from, a: x.at, x: x.cat }); });
+    });
+    // الغائبون اليدويون الذين لم تُقرأ فصولهم
+    ps.forEach(function (p) { (p.marked || []).forEach(function (m) { var sk = p.classroom + '|' + m.key; if (!seen[sk] && m.cat !== 'present') { seen[sk] = 1; e.absent.push({ n: m.raw, c: p.classroom, x: m.cat }); } }); });
+    return e;
+  }
+  function saveLog() {
+    if (S.resumed) return logLoad();
+    var L = logLoad();
+    S.cfg.dates.forEach(function (d) {
+      var ds = slash(fromYmd(d));
+      S.cfg.schools.forEach(function (sc) {
+        var e = dayEntry(ds, sc); if (!e.total) return;
+        L[ds] = L[ds] || {}; L[ds][sc.id] = e;
+      });
+    });
+    logSaveAll(L);
+    return L;
+  }
+  // الغائبون يومين متتاليين أو أكثر (حسب الأيام المسجلة)
+  function followUp(L, ds, sid) {
+    var today = (L[ds] || {})[sid]; if (!today) return [];
+    var prev = Object.keys(L).filter(function (d) { return d < ds && L[d][sid] && L[d][sid].read; }).sort().reverse();
+    return today.absent.filter(function (a) { return a.x !== 'excused'; }).map(function (a) {
+      var n = 1, k = norm(a.n);
+      for (var i = 0; i < prev.length; i++) {
+        var hit = L[prev[i]][sid].absent.some(function (b) { return b.c === a.c && norm(b.n) === k; });
+        if (hit) n++; else break;
+      }
+      return { n: a.n, c: a.c, days: n };
+    }).filter(function (x) { return x.days >= 2; }).sort(function (a, b) { return b.days - a.days; });
+  }
+
+  /* ---------- رسم تقرير نصي كصورة ---------- */
+  function drawReport(R) {
+    var Wd = 1080, pad = 60, F = function (sz, wt) { return (wt || 'bold') + ' ' + sz + 'px Tahoma, "Segoe UI", Arial'; };
+    var col = function (pc) { return pc >= 90 ? '#10b981' : pc >= 70 ? '#f59e0b' : '#ef4444'; };
+    var m = document.createElement('canvas').getContext('2d'); m.direction = 'rtl';
+    function wrap(t, sz) {
+      m.font = F(sz, 'normal'); var words = String(t).split(' '), lines = [], cur = '';
+      words.forEach(function (w) { var x = cur ? cur + ' ' + w : w; if (m.measureText(x).width > Wd - 2 * pad - 20 && cur) { lines.push(cur); cur = w; } else cur = x; });
+      if (cur) lines.push(cur); return lines;
+    }
+    var ops = [], y = 100;
+    ops.push(function (g) { g.fillStyle = '#38bdf8'; g.font = F(46); g.fillText(R.title, Wd - pad, 100); });
+    if (R.sub) { var sy = 145; ops.push(function (g) { g.fillStyle = '#94a3b8'; g.font = F(24, 'normal'); g.fillText(R.sub, Wd - pad, sy); }); }
+    y = 200;
+    (R.schools || []).forEach(function (s) {
+      var yy = y + 50, pc = s.total ? Math.round(s.rec / s.total * 100) : 0;
+      ops.push(function (g) {
+        g.fillStyle = '#1e293b'; g.beginPath(); g.roundRect(pad - 20, yy - 50, Wd - 2 * pad + 40, 100, 18); g.fill();
+        g.fillStyle = '#f8fafc'; g.font = F(32); g.textAlign = 'right'; g.fillText(s.name, Wd - pad, yy + 12);
+        g.fillStyle = col(pc); g.font = F(46); g.textAlign = 'left'; g.fillText(pc + '%', pad, yy + 16);
+        g.fillStyle = '#94a3b8'; g.font = F(20, 'normal'); g.fillText('⁦' + s.rec + ' / ' + s.total + '⁩ حصة', pad + 175, yy + 10);
+        g.textAlign = 'right';
+      });
+      y += 135;
+      if (s.extra) { var ey = y; ops.push(function (g) { g.fillStyle = '#cbd5e1'; g.font = F(22, 'normal'); g.fillText(s.extra, Wd - pad, ey); }); y += 40; }
+    });
+    (R.sections || []).forEach(function (sec) {
+      if (!sec.lines.length) return;
+      y += 20; var hy = y;
+      ops.push(function (g) { g.fillStyle = sec.color || '#38bdf8'; g.font = F(30); g.fillText(sec.h, Wd - pad, hy); });
+      y += 46;
+      sec.lines.forEach(function (ln) {
+        wrap(ln, 23).forEach(function (w) { var ly = y; ops.push(function (g) { g.fillStyle = '#e2e8f0'; g.font = F(23, 'normal'); g.fillText(w, Wd - pad, ly); }); y += 36; });
+      });
+    });
+    y += 40;
+    var cv = document.createElement('canvas'); cv.width = Wd; cv.height = Math.max(600, y);
+    var g = cv.getContext('2d'); g.direction = 'rtl'; g.textAlign = 'right';
+    var grad = g.createLinearGradient(0, 0, 0, cv.height); grad.addColorStop(0, '#0f172a'); grad.addColorStop(1, '#111827');
+    g.fillStyle = grad; g.fillRect(0, 0, Wd, cv.height);
+    ops.forEach(function (f) { f(g); });
+    return cv;
+  }
+  function deliverImage(cv, name) {
+    var url = cv.toDataURL('image/png');
+    var a = document.createElement('a'); a.download = name; a.href = url; document.body.appendChild(a); a.click(); a.remove();
+    var body = $('sme-body');
+    if (body) {
+      var old = $('sme-imgv'); if (old) old.remove();
+      body.insertAdjacentHTML('afterbegin', '<div id="sme-imgv" style="margin:6px 0 12px;text-align:center"><div class="s" style="margin-bottom:6px">📌 على الجوال: اضغط مطولاً على الصورة لحفظها أو مشاركتها</div><img src="' + url + '" style="max-width:100%;max-height:70vh;border:1px solid #334155;border-radius:10px"></div>');
+      body.scrollTop = 0;
+    }
+  }
+  function fdate(ds) { var p = ds.split('/'); return '⁦' + (+p[2]) + '/' + (+p[1]) + '/' + p[0] + '⁩'; }
+  function closingImage() {
+    var L = logLoad(), ds = slash(fromYmd(S.cfg.dates[0]));
+    var dayName = DAYS[fromYmd(S.cfg.dates[0]).getDay()] || '';
+    var schools = [], sections = [];
+    S.cfg.schools.forEach(function (sc) {
+      var e = (L[ds] || {})[sc.id] || dayEntry(ds, sc); if (!e.total) return;
+      var multi = S.cfg.schools.length > 1, pre = multi ? sc.name + ': ' : '';
+      schools.push({ name: sc.name, rec: e.rec, total: e.total, extra: 'رُصد إدارياً: ' + e.admin + ' حصة · الغائبون: ' + e.absent.length });
+      var byC = {};
+      e.absent.forEach(function (a) { (byC[a.c] = byC[a.c] || []).push(a.n + (a.x === 'excused' ? ' (بعذر)' : a.x === 'escape' ? ' (هارب)' : a.x === 'permit' ? ' (مستأذن)' : '')); });
+      sections.push({ h: '🚫 ' + pre + 'الغائبون حسب الفصل', color: '#f87171', lines: Object.keys(byC).sort(function (a, b) { return a.localeCompare(b, 'ar'); }).map(function (c) { return c + ' (' + byC[c].length + '): ' + byC[c].join('، '); }) });
+      sections.push({ h: '🔁 ' + pre + 'يحتاج متابعة (غياب متتالٍ)', color: '#f59e0b', lines: followUp(L, ds, sc.id).map(function (x) { return x.n + ' — ' + x.c + ' — ' + x.days + ' أيام متتالية'; }) });
+      sections.push({ h: '⚠️ ' + pre + 'غياب جزئي (حضر ثم غاب)', color: '#fbbf24', lines: e.partial.map(function (x) { return x.n + ' — ' + x.c + ' — حاضر ح' + x.f + ' ثم ' + CAT_AR[x.x] + ' ح' + x.a; }) });
+      sections.push({ h: '👤 ' + pre + 'حصص رُصدت إدارياً حسب المعلم', color: '#38bdf8', lines: Object.keys(e.teachers).sort(function (a, b) { return e.teachers[b] - e.teachers[a]; }).map(function (t) { return t + ' — ' + e.teachers[t] + ' حصة'; }) });
+    });
+    if (!schools.length) { alert('لا توجد بيانات لهذا اليوم.'); return; }
+    var cv = drawReport({ title: '🔒 إقفال يوم ' + dayName, sub: fdate(ds), schools: schools, sections: sections });
+    deliverImage(cv, 'إقفال-اليوم-' + ds.replace(/\//g, '-') + '.png');
+  }
+
+  /* ---------- عرض السجل ---------- */
+  function showLog() {
+    shell();
+    $('sme-sub').textContent = 'سجل الأيام المحفوظة على هذا الجهاز';
+    $('sme-chips').innerHTML = '';
+    var L = logLoad(), ds = Object.keys(L).sort().reverse(), body = $('sme-body');
+    if (!ds.length) {
+      body.innerHTML = '<div class="msg"><h4>السجل فارغ</h4>يُحفظ كل يوم تلقائياً بعد «إقفال اليوم» أو بعد أي رصد.</div>';
+    } else {
+      var rows = [];
+      ds.forEach(function (d) {
+        Object.keys(L[d]).forEach(function (sid) {
+          var e = L[d][sid], pc = e.total ? Math.round(e.rec / e.total * 100) : 0, fu = followUp(L, d, sid).length;
+          rows.push('<tr><td>' + DAYS[new Date(d.replace(/\//g, '-') + 'T00:00').getDay()] + ' ' + esc(d) + '</td><td>' + esc(e.name) + '</td><td class="n">' + e.rec + '/' + e.total + '</td><td class="n" style="color:' + (pc >= 90 ? '#34d399' : pc >= 70 ? '#fbbf24' : '#f87171') + '">' + pc + '%</td><td class="n">' + e.admin + '</td><td class="n">' + (e.read ? e.absent.length : '—') + '</td><td class="n">' + (fu || '') + '</td></tr>');
+        });
+      });
+      body.innerHTML = '<table class="sum"><tr><th>اليوم</th><th>المدرسة</th><th>مرصود</th><th>النسبة</th><th>رُصد إدارياً</th><th>الغياب</th><th>متابعة</th></tr>' + rows.join('') + '</table>' +
+        '<div class="s">«—» في الغياب: لم تُقرأ الحصص المرصودة ذلك اليوم. «متابعة»: طلاب غائبون يومين متتاليين فأكثر.</div>';
+    }
+    $('sme-foot').innerHTML = (ds.length ? '<button class="b pic" id="sme-wk">🖼️ صورة آخر 5 أيام</button><button class="b sec" id="sme-clr">🗑️ مسح السجل</button>' : '') + '<button class="b sec" id="sme-cl">إغلاق</button>';
+    $('sme-cl').onclick = function () { root.remove(); root = null; };
+    if (!ds.length) return;
+    $('sme-clr').onclick = function () { if (confirm('مسح سجل الأيام من هذا الجهاز؟')) { try { localStorage.removeItem(LKEY); } catch (e) {} showLog(); } };
+    $('sme-wk').onclick = function () {
+      var last = ds.slice(0, 5), agg = {}, lines = [], fu = {};
+      last.forEach(function (d) {
+        Object.keys(L[d]).forEach(function (sid) {
+          var e = L[d][sid], a = agg[sid] = agg[sid] || { name: e.name, rec: 0, total: 0, admin: 0, abs: 0 };
+          a.rec += e.rec; a.total += e.total; a.admin += e.admin; a.abs += e.absent.length;
+          lines.push(DAYS[new Date(d.replace(/\//g, '-') + 'T00:00').getDay()] + ' ' + fdate(d) + (Object.keys(L[d]).length > 1 ? ' — ' + e.name : '') + ' — مرصود ⁦' + e.rec + '/' + e.total + '⁩ — إدارياً ' + e.admin + ' — غياب ' + (e.read ? e.absent.length : '—'));
+          followUp(L, d, sid).forEach(function (x) { var k = x.n + '|' + x.c; if (!fu[k] || fu[k].days < x.days) fu[k] = x; });
+        });
+      });
+      var cv = drawReport({
+        title: 'تقرير رصد الحضور', sub: 'من ' + fdate(last[last.length - 1]) + ' إلى ' + fdate(last[0]),
+        schools: Object.keys(agg).map(function (k) { var a = agg[k]; return { name: a.name, rec: a.rec, total: a.total, extra: 'رُصد إدارياً: ' + a.admin + ' حصة · مجموع الغياب: ' + a.abs }; }),
+        sections: [{ h: '📅 الأيام', lines: lines }, { h: '🔁 يحتاج متابعة', color: '#f59e0b', lines: Object.keys(fu).map(function (k) { var x = fu[k]; return x.n + ' — ' + x.c + ' — ' + x.days + ' أيام متتالية'; }) }]
+      });
+      deliverImage(cv, 'تقرير-الأيام-' + last[0].replace(/\//g, '-') + '.png');
+    };
+  }
+
   /* ---------- 3) الرصد مع إعادة المحاولة والتحقق ---------- */
   async function runSelected(un) {
     var picked = visibleChecks($('sme-body'), true).map(function (c) { return +c.dataset.i; });
     if (!picked.length) { alert('حدّد حصة واحدة على الأقل.'); return; }
     var cfg = S.cfg;
+    var plist = picked.map(function (i) { return un[i]; });
+    attachPlans(plist);
+    var nPlan = plist.reduce(function (a, p) { return a + Object.keys(p.plan || {}).length; }, 0);
     var msg = 'سيتم رصد ' + picked.length + ' حصة' + (cfg.schools.length > 1 ? ' في ' + cfg.schools.length + ' مدرسة' : '') + '.\n' +
-      (cfg.absNames.length ? '⚠️ الغائبون (' + cfg.absNames.length + ') يُرصدون غائبين، والباقون حاضرين.' : 'جميع الطلاب يُرصدون حاضرين.') + '\n\nمتابعة؟';
+      (nPlan ? '🧠 حالات غياب منسوخة/معدّلة: ' + nPlan + ' (طالب×حصة)\n' : '') +
+      (cfg.absNames.length ? '📋 قائمة الغياب (' + cfg.absNames.length + ') تُرصد غائبة.\n' : '') +
+      'الباقون يُرصدون حاضرين.\n\nمتابعة؟';
     if (!confirm(msg)) return;
     primeAudio(); keepAwake(true);
     S.busy = true; S.stats = { absent: {}, noAbsentOption: 0 };
@@ -463,7 +894,7 @@
       await pool(list, cfg.concurrency, async function (it) {
         for (var t = 0; t < 3; t++) {
           try {
-            await recordOne(it.p, cfg.reason, cfg.absNames, S.stats); it.err = '';
+            await recordOne(it.p, cfg.reason, deciderFor(it.p), S.stats); it.err = '';
             var pi = pending.indexOf(it.p); if (pi > -1) { pending.splice(pi, 1); rSave(pending); }
             break;
           }
@@ -512,12 +943,17 @@
       '<div style="padding:12px;border:1px solid ' + (S.failed.length ? '#f59e0b' : '#10b981') + ';border-radius:10px;margin:6px 0 10px;background:rgba(16,185,129,.06)">' +
       '<b>' + (S.failed.length ? '⚠️' : '🎉') + ' تم رصد ' + ok + ' من ' + items.length + ' حصة' + (S.failed.length ? '، وتعذّر ' + S.failed.length : '') + '</b>' + absTxt + '</div>');
     $('sme-body').scrollTop = 0;
+    try { saveLog(); } catch (e) {}
     $('sme-foot').innerHTML = (S.failed.length ? '<button class="b go" id="sme-rf">🔁 إعادة محاولة الفاشل (' + S.failed.length + ')</button>' : '') +
-      '<button class="b pic" id="sme-img">🖼️ صورة نسب الرصد</button><button class="b sec" id="sme-re">🔄 فحص من جديد</button>';
+      (cfg.closing ? '<button class="b go" id="sme-ci">🔒 صورة إقفال اليوم</button>' : '') +
+      '<button class="b pic" id="sme-img">🖼️ صورة نسب الرصد</button><button class="b sec" id="sme-log">📅 سجل الأيام</button><button class="b sec" id="sme-re">🔄 فحص من جديد</button>';
+    if (cfg.closing) { $('sme-ci').onclick = closingImage; }
+    $('sme-log').onclick = showLog;
     if (S.failed.length) $('sme-rf').onclick = function () { var f = S.failed.map(function (x) { return x.p; }); runList(f); };
     $('sme-img').onclick = makeImage;
     $('sme-re').onclick = start;
     progress(1, 1, 'اكتمل');
+    if (cfg.closing && !S.failed.length) setTimeout(closingImage, 300);
   }
   function runList(list) {
     // إعادة عرض قائمة الفاشل فقط ثم رصدها
@@ -584,8 +1020,11 @@
     var c = S.cfg;
     $('sme-sub').textContent = c.schools.map(function (s) { return s.name; }).join(' + ') + ' — ' + c.dates.length + ' يوم';
     if (c.reportOnly) $('sme-sub').textContent += ' — فحص وتقرير فقط';
+    if (c.closing) $('sme-sub').textContent = '🔒 إقفال اليوم — ' + c.schools.map(function (s) { return s.name; }).join(' + ');
     S.busy = true; keepAwake(true);
+    S.groups = {}; S.mapOpen = false;
     try { await scan(); } catch (e) { S.scanErrors.push({ school: '', classroom: '', err: e.message }); }
+    try { if (S.periods.length) await buildGroups(); } catch (e) { S.scanErrors.push({ school: '', classroom: 'قراءة الحصص المرصودة', err: e.message }); }
     S.busy = false; keepAwake(false);
     renderPreview();
   }
@@ -604,13 +1043,29 @@
     return id ? { id: String(id), name: nm || 'مدرستي' } : null;
   }
 
+  // أسماء الغائبين: سطر لكل اسم، أو كشف نور ملصوق (أعمدة مفصولة بجدولة/فواصل)
+  function parseNames(lines) {
+    var out = [], seen = {};
+    lines.join('\n').split(/\r?\n/).forEach(function (ln) {
+      var cells = ln.split(/\t|\s{2,}|[,،;|]/).map(function (c) { return c.trim(); }).filter(Boolean), pick = '';
+      if (cells.length <= 1) pick = (cells[0] || '').replace(/^[0-9\u0660-\u0669.\-)\s]+/, '');
+      else pick = cells.filter(function (c) { return /[\u0600-\u06FF]/.test(c) && c.trim().split(/\s+/).length >= 2 && !/الصف|فصل|الفصل|غائب|حاضر|بعذر|متأخر|الحصة/.test(c); })
+        .sort(function (a, b) { return b.split(/\s+/).length - a.split(/\s+/).length; })[0] || '';
+      pick = pick.replace(/[^\u0600-\u06FF\s]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 4).join(' ');
+      var k = norm(pick);
+      if (k.length > 1 && !seen[k]) { seen[k] = 1; out.push(pick); }
+    });
+    return out;
+  }
+
   W.__smEngine = {
+    showLog: showLog,
     detectSchool: detectSchool,
     pending: function () { var r = rLoad(); return r ? { count: r.items.length, at: r.at } : null; },
     discard: function () { try { localStorage.removeItem(RKEY); } catch (e) {} },
     resume: function () {
       var r = rLoad(); if (!r) return false;
-      S.cfg = Object.assign({ reportOnly: false }, r.cfg);
+      S.cfg = Object.assign({ reportOnly: false }, r.cfg); S.resumed = true;
       shell();
       $('sme-sub').textContent = 'استئناف رصد غير مكتمل — ' + r.items.length + ' حصة';
       S.periods = r.items; chips();
@@ -624,15 +1079,19 @@
         if (!cur) { alert('لم أتمكن من معرفة المدرسة من هذه الصفحة. افتح صفحة «الفصول المدرسية» في منصة مدرستي ثم حاول مجدداً.'); return false; }
         cfg.schools = [cur]; cfg.currentSchoolId = cur.id;
       }
-      var raw = cfg.mode === 'abs' ? (cfg.names || []).filter(function (x) { return norm(x).length > 1; }) : [];
+      var raw = cfg.mode === 'abs' ? parseNames(cfg.names || []) : [];
+      if (cfg.closing) { var t = new Date(); cfg.dates = [t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0')]; cfg.copy = true; cfg.reportOnly = false; }
       S.cfg = {
         dates: cfg.dates || [], schools: cfg.schools || [], currentSchoolId: cfg.currentSchoolId,
         concurrency: Math.min(5, Math.max(1, cfg.concurrency || 3)),
         reason: (cfg.reason || '').trim() || REASON_DEFAULT,
         absRaw: raw,
         absNames: raw.map(norm),
-        reportOnly: !!cfg.reportOnly
+        reportOnly: !!cfg.reportOnly,
+        copy: cfg.copy !== false,
+        closing: !!cfg.closing
       };
+      S.resumed = false;
       start();
       return true;
     }
