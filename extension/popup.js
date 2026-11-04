@@ -75,18 +75,31 @@ function activeTab() {
 function ensureClassroomsPage(tab) {
   if (/\/schoolstructure\/classrooms/i.test(tab.url || '')) return Promise.resolve(tab);
   status('جاري فتح صفحة الفصول…');
-  return new Promise(function (res) {
+  return new Promise(function (res, rej) {
+    var finished = false, t0 = Date.now();
+    function finish(t) { if (finished) return; finished = true; setTimeout(function () { res(t || tab); }, 1200); }
     chrome.tabs.update(tab.id, { url: CLASSROOMS_URL }, function () {
-      function done(id, info, t) {
-        if (id === tab.id && info.status === 'complete') { chrome.tabs.onUpdated.removeListener(done); setTimeout(function () { res(t); }, 800); }
-      }
-      chrome.tabs.onUpdated.addListener(done);
+      // بعض متصفحات الجوال لا تدعم onUpdated جيداً، فنتحقق من حالة التبويب دورياً أيضاً
+      (function poll() {
+        if (finished) return;
+        chrome.tabs.get(tab.id, function (t) {
+          if (t && t.status === 'complete' && /\/schoolstructure\/classrooms/i.test(t.url || '')) finish(t);
+          else if (Date.now() - t0 > 30000) { finished = true; rej(new Error('تعذّر فتح صفحة الفصول. افتحها يدوياً ثم اضغط الزر مجدداً.')); }
+          else setTimeout(poll, 500);
+        });
+      })();
     });
   });
 }
+// يعمل في عالم الإضافة المعزول (Isolated) — مدعوم في Chrome وEdge ومتصفحات الجوال التي تدعم الإضافات.
+// كل ما تحتاجه الأداة (الصفحة، fetch بجلسة المستخدم، localStorage) متاح فيه، دون الحاجة إلى عالم الصفحة.
 function run(tabId, opts) {
-  return chrome.scripting.executeScript(Object.assign({ target: { tabId: tabId }, world: 'MAIN' }, opts))
-    .then(function (r) { return r && r[0] ? r[0].result : undefined; });
+  return chrome.scripting.executeScript(Object.assign({ target: { tabId: tabId } }, opts))
+    .then(function (r) {
+      var x = r && r[0];
+      if (x && x.error) throw new Error(String(x.error.message || x.error));
+      return x ? x.result : undefined;
+    });
 }
 
 /* ---------- دوال تُنفَّذ داخل الصفحة ---------- */
