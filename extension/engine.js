@@ -125,10 +125,12 @@
         var at = a0 ? a0.textContent.trim() : '';
         if (/^(عرض الحضور|رصد الحضور|تم الرصد|لم يتم الرصد|عرض|رصد)$/.test(at)) at = '';
         var title = at || t.replace(/(لم يتم الرصد|تم الرصد|رصد الحضور|عرض الحضور)/g, '').trim() || ('حصة ' + slot);
+        var tip = '';
+        [td, a0].forEach(function (el) { if (el && !tip) tip = el.getAttribute('title') || el.getAttribute('data-original-title') || el.getAttribute('data-bs-original-title') || el.getAttribute('data-teacher') || ''; });
         var info = t.replace(/(لم يتم الرصد|تم الرصد|رصد الحضور|عرض الحضور)/g, '').replace(title, '').replace(/\s+/g, ' ').trim();
         out.push({
           school: school, classroom: c.name, numericClassId: id, encClassId: c.encId,
-          dayName: dn, dateStr: slash(dd), slot: slot, title: title, info: info,
+          dayName: dn, dateStr: slash(dd), slot: slot, title: title, info: info, tip: tip.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
           isRecorded: !unrec && rec, idSchedule: g('IdSchedule'), dateAttendTicks: g('dateAttend'),
           teacherId: g('teacherId'), lectureClassId: g('lectureClassId'), href: href
         });
@@ -145,7 +147,8 @@
     if (!t) return null;
     if (t.indexOf('هارب') > -1 || t.indexOf('هروب') > -1) return 'escape';
     if (t.indexOf('مستاذن') > -1 || t.indexOf('استيذان') > -1 || t.indexOf('استئذان') > -1) return 'permit';
-    if (t.indexOf('عذر') > -1) return 'excused';
+    if (t.indexOf('بدون عذر') > -1 || t.indexOf('بلا عذر') > -1 || t.indexOf('غير مبرر') > -1) return 'absent';
+    if (t.indexOf('عذر') > -1 || t.indexOf('مبرر') > -1) return 'excused';
     if (t.indexOf('متاخر') > -1 || t.indexOf('تاخير') > -1) return 'late';
     if (t.indexOf('غايب') > -1 || t.indexOf('غياب') > -1) return 'absent';
     if (t.indexOf('حاضر') > -1 || t.indexOf('حضور') > -1) return 'present';
@@ -162,6 +165,36 @@
     if (k < 2) return false;
     for (var i = 0; i < k; i++) if (a[i] !== b[i]) return false;
     return a.length < 4 || b.length < 4 || a[a.length - 1] === b[b.length - 1];
+  }
+
+  // تنظيف اسم الطالب من كلمات الحالة والأرقام؛ المفتاح = أول 4 كلمات
+  var STOPW = {};
+  ['غايب', 'غياب', 'بدون', 'بلا', 'عذر', 'بعذر', 'حاضر', 'حضور', 'متاخر', 'تاخر', 'تاخير', 'مستاذن', 'استيذان', 'هارب', 'هروب', 'مبرر', 'غير', 'الحاله', 'الطالب', 'اسم'].forEach(function (w) { STOPW[w] = 1; });
+  function cleanName(txt) {
+    var w = String(txt || '').replace(/[0-9\u0660-\u0669]+/g, ' ').replace(/[^\u0600-\u06FF\s]/g, ' ').replace(/\s+/g, ' ').trim().split(' ')
+      .filter(function (x) { return x && !STOPW[norm(x)]; });
+    var raw = w.slice(0, 5).join(' ');
+    return { raw: raw, key: norm(w.slice(0, 4).join(' ')) };
+  }
+  // اسم المعلم من صفحة الرصد (تقديري حسب بنية الصفحة)
+  function findTeacher(doc) {
+    var inp = doc.querySelector('input[name*="TeacherName" i], input[id*="TeacherName" i]');
+    if (inp && inp.value.trim()) return inp.value.trim();
+    var sel = doc.querySelector('select[name*="Teacher" i] option:checked');
+    if (sel && /[\u0600-\u06FF]/.test(sel.textContent)) return sel.textContent.trim();
+    var best = '';
+    doc.querySelectorAll('label,th,td,span,b,strong,dt,p,div,li,h4,h5,h6').forEach(function (el) {
+      if (best || el.children.length > 3) return;
+      var t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (t.length > 70) return;
+      var m = t.match(/^(?:اسم\s*)?(?:المعلم|معلم المادة|المعلمة)\s*[:：\-]\s*([\u0600-\u06FF][\u0600-\u06FF\s.]{3,})$/);
+      if (m) { best = m[1].trim(); return; }
+      if (/^(?:اسم\s*)?(?:المعلم|معلم المادة)\s*[:：]?$/.test(t)) {
+        var nx = el.nextElementSibling, v = nx ? (nx.value || nx.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        if (v && v.length < 60 && /[\u0600-\u06FF]/.test(v)) best = v;
+      }
+    });
+    return best;
   }
 
   async function resolveHref(p) {
@@ -218,6 +251,7 @@
       }
     }
     if (!form) throw new Error('لم يُعثر على نموذج الرصد');
+    if (!p.teacherName) { try { p.teacherName = findTeacher(doc) || findTeacher(new DOMParser().parseFromString(page, 'text/html')); } catch (e) {} }
     return { form: form, doc: doc };
   }
 
@@ -239,11 +273,9 @@
       var row = groups[n][0].closest('tr') || groups[n][0].closest('.student-row, .row, li') || groups[n][0].parentElement;
       var txt = row ? row.textContent : '';
       opts.map(function (o) { return (o.label || '').trim(); }).filter(Boolean).sort(function (a, b) { return b.length - a.length; }).forEach(function (l) { txt = txt.split(l).join(' '); });
-      txt = txt.replace(/(غائب بعذر|بعذر|غائب|حاضر|متأخر|مستأذن|هارب)/g, ' ');
-      var raw = txt.replace(/[0-9\u0660-\u0669]+/g, ' ').replace(/[^\u0600-\u06FF\s]/g, ' ').replace(/\s+/g, ' ').trim();
-      raw = raw.split(' ').slice(0, 5).join(' ');
+      var nm = cleanName(txt);
       var ck = opts.find(function (o) { return o.checked; });
-      return { group: n, raw: raw, key: norm(raw), rowNorm: norm(row ? row.textContent : ''), opts: opts, cat: ck ? (ck.cat || 'present') : null };
+      return { group: n, raw: nm.raw, key: nm.key, rowNorm: norm(row ? row.textContent : ''), opts: opts, cat: ck ? (ck.cat || 'present') : null };
     }).filter(function (s) { return s.key.length > 1; });
   }
   // قراءة حالات الطلاب من حصة مرصودة (النموذج أولاً، ثم صفحة العرض احتياطاً)
@@ -255,10 +287,10 @@
       var out = [];
       dv.querySelectorAll('tr').forEach(function (tr) {
         var t = tr.textContent || '', c = null, lab = '';
-        ['هارب', 'مستأذن', 'غائب بعذر', 'بعذر', 'متأخر', 'غائب', 'حاضر'].some(function (w) { if (t.indexOf(w) > -1) { c = catOf(w); lab = w; return true; } return false; });
+        ['هارب', 'مستأذن', 'غائب بدون عذر', 'بدون عذر', 'غائب بعذر', 'بعذر', 'متأخر', 'غائب', 'حاضر'].some(function (w) { if (t.indexOf(w) > -1) { c = catOf(w); lab = w; return true; } return false; });
         if (!c) return;
-        var raw = t.split(lab).join(' ').replace(/[0-9\u0660-\u0669]+/g, ' ').replace(/[^\u0600-\u06FF\s]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 5).join(' ');
-        if (norm(raw).length > 1) out.push({ raw: raw, key: norm(raw), cat: c });
+        var nm = cleanName(t.split(lab).join(' '));
+        if (nm.key.length > 1) out.push({ raw: nm.raw, key: nm.key, cat: c });
       });
       if (out.length) return out;
     }
@@ -529,6 +561,13 @@
       }
       progress(++done, jobs.length, 'فحص الجداول');
     });
+    if (cfg.redo) {
+      var L0 = logLoad();
+      S.periods.forEach(function (p) {
+        var e = (L0[p.dateStr] || {})[p.school.id];
+        if (p.isRecorded && e && e.ids && e.ids.indexOf(p.idSchedule) > -1) { p.isRecorded = false; p.redo = true; }
+      });
+    }
     var order = {}; cfg.schools.forEach(function (s, i) { order[s.id] = i; });
     S.periods.sort(function (a, b) {
       return (order[a.school.id] - order[b.school.id]) || a.dateStr.localeCompare(b.dateStr) || a.classroom.localeCompare(b.classroom, 'ar') || a.slot - b.slot;
@@ -708,7 +747,7 @@
     var e = { name: sc.name, total: ps.length, rec: 0, admin: 0, absent: [], partial: [], teachers: {}, at: Date.now(), read: false };
     ps.forEach(function (p) {
       if (p.isRecorded) e.rec++;
-      if (p.byTool) { e.admin++; var t = (p.info || '').trim() || 'غير محدد'; e.teachers[t] = (e.teachers[t] || 0) + 1; }
+      if (p.byTool) { e.admin++; (e.ids = e.ids || []).push(p.idSchedule); var t = (p.teacherName || p.info || p.tip || '').trim() || ('مادة: ' + (p.title || 'غير محددة')); e.teachers[t] = (e.teachers[t] || 0) + 1; }
     });
     var G = S.groups || {}, seen = {};
     Object.keys(G).forEach(function (k) {
@@ -731,7 +770,10 @@
       var ds = slash(fromYmd(d));
       S.cfg.schools.forEach(function (sc) {
         var e = dayEntry(ds, sc); if (!e.total) return;
-        L[ds] = L[ds] || {}; L[ds][sc.id] = e;
+        L[ds] = L[ds] || {};
+        var old = L[ds][sc.id];
+        if (old && old.ids && S.cfg.redo) e.ids = Array.from(new Set((e.ids || []).concat(old.ids)));
+        L[ds][sc.id] = e;
       });
     });
     logSaveAll(L);
@@ -769,7 +811,9 @@
       var yy = y + 50, pc = s.total ? Math.round(s.rec / s.total * 100) : 0;
       ops.push(function (g) {
         g.fillStyle = '#1e293b'; g.beginPath(); g.roundRect(pad - 20, yy - 50, Wd - 2 * pad + 40, 100, 18); g.fill();
-        g.fillStyle = '#f8fafc'; g.font = F(32); g.textAlign = 'right'; g.fillText(s.name, Wd - pad, yy + 12);
+        var fs = 32, maxW = Wd - 2 * pad - 360; g.font = F(fs);
+        while (fs > 18 && g.measureText(s.name).width > maxW) { fs -= 2; g.font = F(fs); }
+        g.fillStyle = '#f8fafc'; g.textAlign = 'right'; g.fillText(s.name, Wd - pad, yy + 12);
         g.fillStyle = col(pc); g.font = F(46); g.textAlign = 'left'; g.fillText(pc + '%', pad, yy + 16);
         g.fillStyle = '#94a3b8'; g.font = F(20, 'normal'); g.fillText('⁦' + s.rec + ' / ' + s.total + '⁩ حصة', pad + 175, yy + 10);
         g.textAlign = 'right';
@@ -779,9 +823,13 @@
     });
     (R.sections || []).forEach(function (sec) {
       if (!sec.lines.length) return;
-      y += 20; var hy = y;
-      ops.push(function (g) { g.fillStyle = sec.color || '#38bdf8'; g.font = F(30); g.fillText(sec.h, Wd - pad, hy); });
-      y += 46;
+      y += 20;
+      m.font = F(30);
+      var hl = [], cur = '';
+      sec.h.split(' ').forEach(function (w) { var x = cur ? cur + ' ' + w : w; if (m.measureText(x).width > Wd - 2 * pad && cur) { hl.push(cur); cur = w; } else cur = x; });
+      if (cur) hl.push(cur);
+      hl.forEach(function (h) { var hy = y; ops.push(function (g) { g.fillStyle = sec.color || '#38bdf8'; g.font = F(30); g.fillText(h, Wd - pad, hy); }); y += 42; });
+      y += 4;
       sec.lines.forEach(function (ln) {
         wrap(ln, 23).forEach(function (w) { var ly = y; ops.push(function (g) { g.fillStyle = '#e2e8f0'; g.font = F(23, 'normal'); g.fillText(w, Wd - pad, ly); }); y += 36; });
       });
@@ -809,9 +857,10 @@
     var L = logLoad(), ds = slash(fromYmd(S.cfg.dates[0]));
     var dayName = DAYS[fromYmd(S.cfg.dates[0]).getDay()] || '';
     var schools = [], sections = [];
-    S.cfg.schools.forEach(function (sc) {
+    var withData = S.cfg.schools.filter(function (sc) { var e = (L[ds] || {})[sc.id] || dayEntry(ds, sc); return e.total > 0; });
+    withData.forEach(function (sc) {
       var e = (L[ds] || {})[sc.id] || dayEntry(ds, sc); if (!e.total) return;
-      var multi = S.cfg.schools.length > 1, pre = multi ? sc.name + ': ' : '';
+      var multi = withData.length > 1, pre = multi ? sc.name + ': ' : '';
       schools.push({ name: sc.name, rec: e.rec, total: e.total, extra: 'رُصد إدارياً: ' + e.admin + ' حصة · الغائبون: ' + e.absent.length });
       var byC = {};
       e.absent.forEach(function (a) { (byC[a.c] = byC[a.c] || []).push(a.n + (a.x === 'excused' ? ' (بعذر)' : a.x === 'escape' ? ' (هارب)' : a.x === 'permit' ? ' (مستأذن)' : '')); });
@@ -844,8 +893,14 @@
       body.innerHTML = '<table class="sum"><tr><th>اليوم</th><th>المدرسة</th><th>مرصود</th><th>النسبة</th><th>رُصد إدارياً</th><th>الغياب</th><th>متابعة</th></tr>' + rows.join('') + '</table>' +
         '<div class="s">«—» في الغياب: لم تُقرأ الحصص المرصودة ذلك اليوم. «متابعة»: طلاب غائبون يومين متتاليين فأكثر.</div>';
     }
-    $('sme-foot').innerHTML = (ds.length ? '<button class="b pic" id="sme-wk">🖼️ صورة آخر 5 أيام</button><button class="b sec" id="sme-clr">🗑️ مسح السجل</button>' : '') + '<button class="b sec" id="sme-cl">إغلاق</button>';
+    var td = slash(new Date()), redoS = Object.keys(L[td] || {}).filter(function (sid) { return (L[td][sid].ids || []).length; });
+    $('sme-foot').innerHTML = (redoS.length ? '<button class="b go" id="sme-redo">🛠️ إعادة رصد حصص اليوم الإدارية (' + redoS.reduce(function (a, sid) { return a + L[td][sid].ids.length; }, 0) + ')</button>' : '') +
+      (ds.length ? '<button class="b pic" id="sme-wk">🖼️ صورة آخر 5 أيام</button><button class="b sec" id="sme-clr">🗑️ مسح السجل</button>' : '') + '<button class="b sec" id="sme-cl">إغلاق</button>';
     $('sme-cl').onclick = function () { root.remove(); root = null; };
+    if (redoS.length) $('sme-redo').onclick = function () {
+      if (!confirm('سيُعاد رصد الحصص التي رصدتها الأداة اليوم فقط، بنسخ الغياب من حصص المعلمين من جديد. متابعة؟')) return;
+      W.__smEngine.open({ closing: true, redo: true, schools: redoS.map(function (sid) { return { id: sid, name: L[td][sid].name }; }), currentSchoolId: redoS[0], concurrency: 3 });
+    };
     if (!ds.length) return;
     $('sme-clr').onclick = function () { if (confirm('مسح سجل الأيام من هذا الجهاز؟')) { try { localStorage.removeItem(LKEY); } catch (e) {} showLog(); } };
     $('sme-wk').onclick = function () {
@@ -1089,7 +1144,8 @@
         absNames: raw.map(norm),
         reportOnly: !!cfg.reportOnly,
         copy: cfg.copy !== false,
-        closing: !!cfg.closing
+        closing: !!cfg.closing,
+        redo: !!cfg.redo
       };
       S.resumed = false;
       start();
