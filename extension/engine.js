@@ -640,7 +640,7 @@
     foot.innerHTML =
       (un.length && !S.cfg.reportOnly ? '<button class="b go" id="sme-go">' + (S.cfg.closing ? '🔒 اعتماد وإقفال اليوم' : '⚡ رصد المحدد') + ' (<span id="sme-n">0</span>)</button>' +
         '<button class="b sec" id="sme-all">تحديد الكل</button><button class="b sec" id="sme-none">إلغاء التحديد</button>' : '') +
-      (S.cfg.closing && !un.length ? '<button class="b go" id="sme-ci">🔒 صورة إقفال اليوم</button>' : '') +
+      (S.cfg.closing && !un.length ? '<button class="b go" id="sme-ci">🔒 تقرير اليوم (PDF)</button>' : '') +
       '<button class="b pic" id="sme-img">🖼️ صورة نسب الرصد</button>';
     if (S.cfg.closing && !un.length && S.periods.length) { saveLog(); $('sme-ci').onclick = closingImage; }
     if (un.length && !S.cfg.reportOnly) {
@@ -842,13 +842,60 @@
     ops.forEach(function (f) { f(g); });
     return cv;
   }
+  // تحويل الصورة الطويلة إلى PDF بصفحات A4 (يُقص بين الأسطر لا وسطها)
+  function canvasToPdf(cv) {
+    var W0 = cv.width, pageH = Math.round(W0 * 841.89 / 595.28), ctx = cv.getContext('2d'), cuts = [0], y = 0;
+    function safe(row) {
+      var d = ctx.getImageData(0, row, W0, 1).data, r0 = d[0], g0 = d[1], b0 = d[2], n = 0;
+      for (var i = 0; i < d.length; i += 4) if (Math.abs(d[i] - r0) > 60 || Math.abs(d[i + 1] - g0) > 60 || Math.abs(d[i + 2] - b0) > 60) { if (++n > 20) return false; }
+      return true;
+    }
+    while (cv.height - y > pageH) {
+      var c = y + pageH, k = c;
+      for (; k > c - 450; k -= 2) if (safe(k)) break;
+      if (k <= c - 450) k = c;
+      cuts.push(k); y = k;
+    }
+    cuts.push(cv.height);
+    var enc = function (str) { var u = new Uint8Array(str.length); for (var i = 0; i < str.length; i++) u[i] = str.charCodeAt(i) & 255; return u; };
+    var parts = [], len = 0, offs = [];
+    var push = function (u) { if (typeof u === 'string') u = enc(u); parts.push(u); len += u.length; };
+    var nP = cuts.length - 1, obj = function (n) { offs[n] = len; };
+    push('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+    obj(1); push('1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n');
+    var kids = []; for (var i = 0; i < nP; i++) kids.push((3 + i * 3) + ' 0 R');
+    obj(2); push('2 0 obj<</Type/Pages/Count ' + nP + '/Kids[' + kids.join(' ') + ']>>endobj\n');
+    for (var p = 0; p < nP; p++) {
+      var h = cuts[p + 1] - cuts[p], pc = document.createElement('canvas'); pc.width = W0; pc.height = h;
+      var pg = pc.getContext('2d'); pg.fillStyle = '#ffffff'; pg.fillRect(0, 0, W0, h); pg.drawImage(cv, 0, -cuts[p]);
+      var bin = atob(pc.toDataURL('image/jpeg', 0.9).split(',')[1]), jpg = enc(bin);
+      var n = 3 + p * 3, dh = (h * 595.28 / W0).toFixed(2), ty = (841.89 - h * 595.28 / W0).toFixed(2);
+      var cs = 'q 595.28 0 0 ' + dh + ' 0 ' + ty + ' cm /Im0 Do Q';
+      obj(n); push(n + ' 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 595.28 841.89]/Resources<</XObject<</Im0 ' + (n + 1) + ' 0 R>>>>/Contents ' + (n + 2) + ' 0 R>>endobj\n');
+      obj(n + 1); push((n + 1) + ' 0 obj<</Type/XObject/Subtype/Image/Width ' + W0 + '/Height ' + h + '/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length ' + jpg.length + '>>stream\n'); push(jpg); push('\nendstream endobj\n');
+      obj(n + 2); push((n + 2) + ' 0 obj<</Length ' + cs.length + '>>stream\n' + cs + '\nendstream endobj\n');
+    }
+    var total = 3 + nP * 3, xref = len, x = 'xref\n0 ' + total + '\n0000000000 65535 f \n';
+    for (var j = 1; j < total; j++) x += String(offs[j]).padStart(10, '0') + ' 00000 n \n';
+    push(x + 'trailer<</Size ' + total + '/Root 1 0 R>>\nstartxref\n' + xref + '\n%%EOF');
+    return new Blob(parts, { type: 'application/pdf' });
+  }
+  function saveBlob(blob, name) {
+    var u = URL.createObjectURL(blob), a = document.createElement('a');
+    a.download = name; a.href = u; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(u); }, 60000);
+  }
   function deliverImage(cv, name) {
-    var url = cv.toDataURL('image/png');
-    var a = document.createElement('a'); a.download = name; a.href = url; document.body.appendChild(a); a.click(); a.remove();
+    var url = cv.toDataURL('image/png'), pdfName = name.replace(/\.png$/, '.pdf'), pdf = null;
+    try { pdf = canvasToPdf(cv); saveBlob(pdf, pdfName); } catch (e) { var a = document.createElement('a'); a.download = name; a.href = url; document.body.appendChild(a); a.click(); a.remove(); }
     var body = $('sme-body');
     if (body) {
       var old = $('sme-imgv'); if (old) old.remove();
-      body.insertAdjacentHTML('afterbegin', '<div id="sme-imgv" style="margin:6px 0 12px;text-align:center"><div class="s" style="margin-bottom:6px">📌 على الجوال: اضغط مطولاً على الصورة لحفظها أو مشاركتها</div><img src="' + url + '" style="max-width:100%;max-height:70vh;border:1px solid #334155;border-radius:10px"></div>');
+      body.insertAdjacentHTML('afterbegin', '<div id="sme-imgv" style="margin:6px 0 12px;text-align:center">' +
+        '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:8px">' + (pdf ? '<button class="b go" id="sme-pdf">📄 تنزيل PDF</button>' : '') + '<button class="b pic" id="sme-png">🖼️ تنزيل صورة</button></div>' +
+        '<div class="s" style="margin-bottom:6px">📌 على الجوال يمكنك أيضاً الضغط مطولاً على الصورة لحفظها أو مشاركتها</div><img src="' + url + '" style="max-width:100%;max-height:70vh;border:1px solid #334155;border-radius:10px"></div>');
+      if (pdf) $('sme-pdf').onclick = function () { saveBlob(pdf, pdfName); };
+      $('sme-png').onclick = function () { var a = document.createElement('a'); a.download = name; a.href = url; document.body.appendChild(a); a.click(); a.remove(); };
       body.scrollTop = 0;
     }
   }
@@ -1008,11 +1055,11 @@
         });
       });
       body.innerHTML = '<table class="sum"><tr><th>اليوم</th><th>المدرسة</th><th>مرصود</th><th>النسبة</th><th>رُصد إدارياً</th><th>الغياب</th><th>متابعة</th></tr>' + rows.join('') + '</table>' +
-        '<div class="s">اضغط على أي يوم لإخراج صورة تقريره. «—» في الغياب: لم تُقرأ الحصص المرصودة ذلك اليوم. «متابعة»: طلاب غائبون يومين متتاليين فأكثر.</div>';
+        '<div class="s">اضغط على أي يوم لإخراج تقريره PDF. «—» في الغياب: لم تُقرأ الحصص المرصودة ذلك اليوم. «متابعة»: طلاب غائبون يومين متتاليين فأكثر.</div>';
     }
     var td = slash(new Date()), redoS = Object.keys(L[td] || {}).filter(function (sid) { return (L[td][sid].ids || []).length; });
     $('sme-foot').innerHTML = (redoS.length ? '<button class="b go" id="sme-redo">🛠️ إعادة رصد حصص اليوم الإدارية (' + redoS.reduce(function (a, sid) { return a + L[td][sid].ids.length; }, 0) + ')</button>' : '') +
-      (ds.length ? '<button class="b pic" id="sme-wk">🖼️ صورة آخر 5 أيام</button><button class="b sec" id="sme-clr">🗑️ مسح السجل</button>' : '') + '<button class="b sec" id="sme-cl">إغلاق</button>';
+      (ds.length ? '<button class="b pic" id="sme-wk">📄 تقرير آخر 5 أيام (PDF)</button><button class="b sec" id="sme-clr">🗑️ مسح السجل</button>' : '') + '<button class="b sec" id="sme-cl">إغلاق</button>';
     $('sme-cl').onclick = function () { root.remove(); root = null; };
     if (redoS.length) $('sme-redo').onclick = function () {
       if (!confirm('سيُعاد رصد الحصص التي رصدتها الأداة اليوم فقط، بنسخ الغياب من حصص المعلمين من جديد. متابعة؟')) return;
@@ -1118,7 +1165,7 @@
     $('sme-body').scrollTop = 0;
     try { saveLog(); } catch (e) {}
     $('sme-foot').innerHTML = (S.failed.length ? '<button class="b go" id="sme-rf">🔁 إعادة محاولة الفاشل (' + S.failed.length + ')</button>' : '') +
-      (cfg.closing ? '<button class="b go" id="sme-ci">🔒 صورة إقفال اليوم</button>' : '') +
+      (cfg.closing ? '<button class="b go" id="sme-ci">🔒 تقرير اليوم (PDF)</button>' : '') +
       '<button class="b pic" id="sme-img">🖼️ صورة نسب الرصد</button><button class="b sec" id="sme-log">📅 سجل الأيام</button><button class="b sec" id="sme-re">🔄 فحص من جديد</button>';
     if (cfg.closing) { $('sme-ci').onclick = closingImage; }
     $('sme-log').onclick = showLog;
