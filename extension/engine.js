@@ -507,8 +507,28 @@
     renderPreview();
   }
 
+  // اكتشاف المدرسة الحالية من الصفحة نفسها (احتياطي إن لم تُرسلها نافذة الإضافة)
+  function detectSchool() {
+    var qs = new URLSearchParams(location.search), id = qs.get('schoolId') || qs.get('SchoolId') ||
+      (document.getElementById('hSchoolId') || {}).value || (document.querySelector('input[name="SchoolId"]') || {}).value || '';
+    if (!id) { try { id = localStorage.getItem('madrasati_hSchoolId') || localStorage.getItem('globalschoolId') || ''; } catch (e) {} }
+    if (!id) {
+      var a = Array.from(document.querySelectorAll('a[href*="SchoolId="], a[href*="schoolId="]')).map(function (x) { return x.getAttribute('href'); });
+      for (var i = 0; i < a.length && !id; i++) { var m = a[i].match(/[?&]schoolId=([^&#]+)/i); if (m) id = decodeURIComponent(m[1]); }
+    }
+    var el = document.querySelector('.school-name, .user-school-name, #schoolName, .navbar-brand span'), nm = el ? el.textContent.trim() : '';
+    if (!nm) { try { nm = localStorage.getItem('school_name_' + id) || localStorage.getItem('madrasati_schoolName') || ''; } catch (e) {} }
+    return id ? { id: String(id), name: nm || 'مدرستي' } : null;
+  }
+
   W.__smEngine = {
+    detectSchool: detectSchool,
     open: function (cfg) {
+      if (!cfg.schools || !cfg.schools.length) {
+        var cur = detectSchool();
+        if (!cur) { alert('لم أتمكن من معرفة المدرسة من هذه الصفحة. افتح صفحة «الفصول المدرسية» في منصة مدرستي ثم حاول مجدداً.'); return false; }
+        cfg.schools = [cur]; cfg.currentSchoolId = cur.id;
+      }
       var raw = cfg.mode === 'abs' ? (cfg.names || []).filter(function (x) { return norm(x).length > 1; }) : [];
       S.cfg = {
         dates: cfg.dates || [], schools: cfg.schools || [], currentSchoolId: cfg.currentSchoolId,

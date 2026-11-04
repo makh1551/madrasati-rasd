@@ -2,6 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>رصد الحضور السريع</title>
 <style>
   :root{--bg:#0f172a;--card:#1e293b;--line:#334155;--txt:#e2e8f0;--mut:#94a3b8;--pri:#0284c7;--ok:#10b981;--warn:#f59e0b}
@@ -40,6 +41,26 @@
   .sc input{margin:0}.sc small{color:var(--mut);font-size:10.5px}
   .sc .del{margin-inline-start:auto;color:#64748b;cursor:pointer;font-size:14px;padding:0 4px}
   .sec.row{gap:8px}
+  /* الجوال ووضع النافذة داخل الصفحة: عرض كامل وأهداف لمس أكبر */
+  html.m body{width:auto;font-size:16px}
+  html.m header{padding:18px 18px 12px}
+  html.m header b{font-size:19px}
+  html.m header small{font-size:13px}
+  html.m main{padding:14px 18px 24px}
+  html.m .opt{padding:14px;font-size:16px;border-radius:12px}
+  html.m .days{grid-template-columns:repeat(3,1fr);gap:8px}
+  html.m .day{padding:12px 4px;font-size:15px;border-radius:10px}
+  html.m .day small{font-size:12px}
+  html.m .quickpick{font-size:14px}
+  html.m .quickpick a{padding:6px 0}
+  html.m select{padding:10px;font-size:15px}
+  html.m .lbl,html.m .hint{font-size:13.5px}
+  html.m .sc{padding:8px 0;font-size:15px}
+  html.m button{padding:16px;font-size:16px;border-radius:12px}
+  html.m #quick{position:sticky;bottom:10px;font-size:17px;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+  html.embed #close{display:flex}
+  #close{display:none;position:absolute;top:12px;left:12px;width:40px;height:40px;padding:0;border-radius:50%;background:var(--card);color:var(--txt);font-size:22px;align-items:center;justify-content:center}
+  header{position:relative}
   footer{padding:8px 16px 12px;color:#64748b;font-size:11px;text-align:center}
 </style>
 </head>
@@ -47,6 +68,7 @@
 <header>
   <b>⚡ رصد الحضور السريع</b>
   <small>منصة مدرستي — رصد يوم أو عدة أيام أو أسبوع كامل</small>
+  <button id="close" type="button" aria-label="إغلاق">×</button>
 </header>
 <main>
   <label class="opt" id="optAll"><input type="radio" name="mode" value="all"> ✅ جميع الطلاب حاضرون</label>
@@ -89,6 +111,7 @@
   <button id="open">فتح اللوحة التفصيلية (الأداة الأصلية)</button>
   <div id="status"></div>
 </main>
+<script>(function(){var e=/[?&]embed=1/.test(location.search);if(e||Math.min(screen.width,screen.height)<700)document.documentElement.classList.add("m");if(e)document.documentElement.classList.add("embed");})();</script>
 <script src="popup.js"></script>
 </body>
 </html>

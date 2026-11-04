@@ -63,14 +63,28 @@ function chosenDates() {
 }
 
 /* ---------- التعامل مع التبويب ---------- */
-function activeTab() {
-  return new Promise(function (res, rej) {
-    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-      var t = tabs && tabs[0];
-      if (!t || !/^https:\/\/schools\.madrasati\.sa\//.test(t.url || '')) rej(new Error('notMadrasati'));
-      else res(t);
-    });
-  });
+var EMBED = /[?&]embed=1/.test(location.search);
+function closeUI() {
+  if (EMBED) { try { parent.postMessage({ smRasd: 'close' }, '*'); } catch (e) {} }
+  else window.close();
+}
+// البحث عن تبويب مدرستي بعدة طرق، لأن بعض متصفحات الجوال لا تُرجع التبويب أو رابطه بالطريقة المعتادة
+function q(opts) { return new Promise(function (r) { try { chrome.tabs.query(opts, function (t) { r(t || []); }); } catch (e) { r([]); } }); }
+function isMad(u) { return /^https:\/\/schools\.madrasati\.sa\//.test(u || ''); }
+async function activeTab() {
+  var cands = [].concat(await q({ active: true, currentWindow: true }), await q({ active: true, lastFocusedWindow: true }),
+    await q({ url: 'https://schools.madrasati.sa/*', active: true }), await q({ url: 'https://schools.madrasati.sa/*' }));
+  for (var i = 0; i < cands.length; i++) {
+    var t = cands[i];
+    if (isMad(t.url)) return t;
+    if (!t.url && t.id != null) {   // الرابط مخفي: نسأل الصفحة نفسها
+      try {
+        var href = await run(t.id, { func: function () { return location.href; } });
+        if (isMad(href)) { t.url = href; return t; }
+      } catch (e) {}
+    }
+  }
+  throw new Error('notMadrasati');
 }
 function ensureClassroomsPage(tab) {
   if (/\/schoolstructure\/classrooms/i.test(tab.url || '')) return Promise.resolve(tab);
@@ -178,12 +192,12 @@ async function start(quick) {
   try {
     if (!quick) {
       await prepare(m, names);
-      status('تم فتح اللوحة التفصيلية في الصفحة.', 'ok'); window.close(); return;
+      status('تم فتح اللوحة التفصيلية في الصفحة.', 'ok'); closeUI(); return;
     }
     var days = chosenDates();
     if (!days.length) { status('اختر يوماً واحداً على الأقل.', 'err'); return; }
     var schools = chosenSchools();
-    if (!schools.length) { status('اختر مدرسة واحدة على الأقل.', 'err'); return; }
+    if (!schools.length && schoolList.length) { status('اختر مدرسة واحدة على الأقل.', 'err'); return; }
     var tab = await activeTab();
     tab = await ensureClassroomsPage(tab);
     var cur = await run(tab.id, { func: pageSchool });
@@ -194,7 +208,7 @@ async function start(quick) {
                currentSchoolId: cur && cur.id, concurrency: parseInt($('speed').value, 10) }]
     });
     chrome.storage.local.set({ speed: $('speed').value });
-    window.close();
+    closeUI();
   } catch (e) {
     if (e && e.message === 'notMadrasati') status('افتح منصة مدرستي (schools.madrasati.sa) بحساب المدير أولاً، ثم اضغط الزر.', 'err');
     else status('حدث خطأ: ' + (e && e.message || e), 'err');
@@ -234,6 +248,7 @@ $('pickAll').onclick = function (e) { e.preventDefault(); pick(function () { ret
 $('pickNone').onclick = function (e) { e.preventDefault(); pick(function () { return false; }); };
 document.querySelectorAll('input[name=mode]').forEach(function (r) { r.onchange = function () { paint(); save(); }; });
 $('names').oninput = save;
+if ($('close')) $('close').onclick = closeUI;
 $('quick').onclick = function () { start(true); };
 $('open').onclick = function () { start(false); };
 loadSchools();
