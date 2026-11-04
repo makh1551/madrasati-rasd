@@ -243,7 +243,7 @@
     if ($('sme-style')) return;
     var st = document.createElement('style'); st.id = 'sme-style';
     st.textContent =
-      '#sme{position:fixed;inset:0;z-index:10000010;background:rgba(2,6,23,.72);display:flex;align-items:center;justify-content:center;font:13px Tahoma,"Segoe UI",sans-serif;direction:rtl}' +
+      '#sme{position:fixed;inset:0;z-index:2147483002;background:rgba(2,6,23,.72);display:flex;align-items:center;justify-content:center;font:13px Tahoma,"Segoe UI",sans-serif;direction:rtl}' +
       '#sme .card{background:#0f172a;color:#e2e8f0;width:min(980px,96vw);height:min(92vh,900px);border:1px solid #334155;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5)}' +
       '#sme header{padding:12px 18px;border-bottom:1px solid #334155;display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,#1e293b,#0f172a)}' +
       '#sme header b{font-size:15px;color:#38bdf8}#sme header small{color:#94a3b8;display:block;margin-top:2px}' +
