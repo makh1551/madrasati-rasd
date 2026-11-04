@@ -853,25 +853,141 @@
     }
   }
   function fdate(ds) { var p = ds.split('/'); return '⁦' + (+p[2]) + '/' + (+p[1]) + '/' + p[0] + '⁩'; }
-  function closingImage() {
-    var L = logLoad(), ds = slash(fromYmd(S.cfg.dates[0]));
-    var dayName = DAYS[fromYmd(S.cfg.dates[0]).getDay()] || '';
-    var schools = [], sections = [];
-    var withData = S.cfg.schools.filter(function (sc) { var e = (L[ds] || {})[sc.id] || dayEntry(ds, sc); return e.total > 0; });
-    withData.forEach(function (sc) {
-      var e = (L[ds] || {})[sc.id] || dayEntry(ds, sc); if (!e.total) return;
-      var multi = withData.length > 1, pre = multi ? sc.name + ': ' : '';
-      schools.push({ name: sc.name, rec: e.rec, total: e.total, extra: 'رُصد إدارياً: ' + e.admin + ' حصة · الغائبون: ' + e.absent.length });
+  /* ---------- صورة إقفال اليوم (تصميم بطاقات) ---------- */
+  function shortCls(c) { var p = String(c).split(/\s*[-–]\s*/); return (p.length > 1 ? p[p.length - 1] : c).trim(); }
+  function shortName(n) { var w = String(n).split(' ').filter(Boolean); return w.length > 3 ? w[0] + ' ' + w[1] + ' ' + w[w.length - 1] : w.join(' '); }
+  function closingImage(dsArg) {
+    var L = logLoad(), ds = typeof dsArg === 'string' ? dsArg : slash(fromYmd(S.cfg.dates[0]));
+    var dayName = DAYS[new Date(ds.replace(/\//g, '-') + 'T00:00').getDay()] || '';
+    var list = [];
+    if (typeof dsArg === 'string') Object.keys(L[ds] || {}).forEach(function (sid) { var e = L[ds][sid]; if (e.total) list.push({ sc: { id: sid, name: e.name }, e: e, fu: followUp(L, ds, sid) }); });
+    else S.cfg.schools.forEach(function (sc) { var e = (L[ds] || {})[sc.id] || dayEntry(ds, sc); if (e.total) list.push({ sc: sc, e: e, fu: followUp(L, ds, sc.id) }); });
+    if (!list.length) { alert('لا توجد بيانات لهذا اليوم.'); return; }
+
+    var Wd = 1080, P = 48, MAXH = 15000;
+    var C = { bg: '#f8fafc', card: '#ffffff', line: '#e2e8f0', ink: '#0f172a', mut: '#64748b', pri: '#0369a1', abs: '#dc2626', exc: '#7c3aed', warn: '#d97706', ok: '#059669' };
+    var cv = document.createElement('canvas'); cv.width = Wd; cv.height = MAXH;
+    var g = cv.getContext('2d'); g.direction = 'rtl'; g.textAlign = 'right'; g.textBaseline = 'alphabetic';
+    var F = function (sz, wt) { return (wt || 'bold') + ' ' + sz + 'px Tahoma, "Segoe UI", Arial'; };
+    var rr = function (x, y, w, h, r, fill, stroke) { g.beginPath(); g.roundRect(x, y, w, h, r); if (fill) { g.fillStyle = fill; g.fill(); } if (stroke) { g.strokeStyle = stroke; g.lineWidth = 2; g.stroke(); } };
+    var txt = function (t, x, y, sz, col, wt, al) { g.font = F(sz, wt); g.fillStyle = col; g.textAlign = al || 'right'; g.fillText(t, x, y); g.textAlign = 'right'; };
+    var fit = function (t, sz, maxW, wt) { g.font = F(sz, wt); while (sz > 14 && g.measureText(t).width > maxW) { sz -= 1; g.font = F(sz, wt); } return sz; };
+    var pcCol = function (pc) { return pc >= 90 ? C.ok : pc >= 70 ? C.warn : C.abs; };
+    g.fillStyle = C.bg; g.fillRect(0, 0, Wd, MAXH);
+
+    // الترويسة
+    var hg = g.createLinearGradient(0, 0, Wd, 0); hg.addColorStop(0, '#0c4a6e'); hg.addColorStop(1, '#0369a1');
+    g.fillStyle = hg; g.fillRect(0, 0, Wd, 190);
+    txt('تقرير إقفال يوم ' + dayName, Wd - P, 82, 44, '#ffffff');
+    txt(fdate(ds) + '  ·  رصد الحضور والغياب', Wd - P, 130, 24, '#bae6fd', 'normal');
+    var y = 230;
+
+    list.forEach(function (it) {
+      var e = it.e, pc = e.total ? Math.round(e.rec / e.total * 100) : 0;
+      var exc = e.absent.filter(function (a) { return a.x === 'excused'; }).length, abs = e.absent.length - exc;
+      // اسم المدرسة
+      var ns = fit(it.sc.name, 32, Wd - 2 * P);
+      txt(it.sc.name, Wd - P, y, ns, C.ink);
+      y += 26;
+      // بطاقات المؤشرات
+      var kp = [
+        { v: pc + '%', l: 'نسبة الرصد', c: pcCol(pc), s: '⁦' + e.rec + '/' + e.total + '⁩ حصة' },
+        { v: String(Math.max(0, e.rec - e.admin)), l: 'رصدها المعلمون', c: C.pri, s: e.total ? Math.round(Math.max(0, e.rec - e.admin) / e.total * 100) + '%' : '' },
+        { v: String(e.admin), l: 'رُصدت إدارياً', c: C.warn, s: e.total ? Math.round(e.admin / e.total * 100) + '%' : '' },
+        { v: String(e.absent.length), l: 'الغائبون', c: C.abs, s: exc ? abs + ' بدون عذر · ' + exc + ' بعذر' : '' }
+      ];
+      var kw = (Wd - 2 * P - 3 * 16) / 4;
+      kp.forEach(function (k, i) {
+        var x = Wd - P - (i + 1) * kw - i * 16;
+        rr(x, y, kw, 150, 18, C.card, C.line);
+        g.fillStyle = k.c; g.fillRect(x + kw - 8, y + 18, 6, 114);
+        txt(k.v, x + kw - 26, y + 70, 46, k.c);
+        txt(k.l, x + kw - 26, y + 108, 21, C.ink);
+        if (k.s) txt(k.s, x + kw - 26, y + 136, fit(k.s, 17, kw - 40, 'normal'), C.mut, 'normal');
+      });
+      y += 190;
+
+      var section = function (title, color, count) {
+        g.fillStyle = color; g.beginPath(); g.roundRect(Wd - P - 8, y - 28, 8, 34, 4); g.fill();
+        txt(title + (count != null ? '  (' + count + ')' : ''), Wd - P - 22, y, 28, C.ink);
+        y += 26;
+      };
+
+      // الغياب حسب الفصل: بطاقات في عمودين
       var byC = {};
-      e.absent.forEach(function (a) { (byC[a.c] = byC[a.c] || []).push(a.n + (a.x === 'excused' ? ' (بعذر)' : a.x === 'escape' ? ' (هارب)' : a.x === 'permit' ? ' (مستأذن)' : '')); });
-      sections.push({ h: '🚫 ' + pre + 'الغائبون حسب الفصل', color: '#f87171', lines: Object.keys(byC).sort(function (a, b) { return a.localeCompare(b, 'ar'); }).map(function (c) { return c + ' (' + byC[c].length + '): ' + byC[c].join('، '); }) });
-      sections.push({ h: '🔁 ' + pre + 'يحتاج متابعة (غياب متتالٍ)', color: '#f59e0b', lines: followUp(L, ds, sc.id).map(function (x) { return x.n + ' — ' + x.c + ' — ' + x.days + ' أيام متتالية'; }) });
-      sections.push({ h: '⚠️ ' + pre + 'غياب جزئي (حضر ثم غاب)', color: '#fbbf24', lines: e.partial.map(function (x) { return x.n + ' — ' + x.c + ' — حاضر ح' + x.f + ' ثم ' + CAT_AR[x.x] + ' ح' + x.a; }) });
-      sections.push({ h: '👤 ' + pre + 'حصص رُصدت إدارياً حسب المعلم', color: '#38bdf8', lines: Object.keys(e.teachers).sort(function (a, b) { return e.teachers[b] - e.teachers[a]; }).map(function (t) { return t + ' — ' + e.teachers[t] + ' حصة'; }) });
+      e.absent.forEach(function (a) { (byC[a.c] = byC[a.c] || []).push(a); });
+      var cls = Object.keys(byC).sort(function (a, b) { return a.localeCompare(b, 'ar', { numeric: true }); });
+      if (cls.length) {
+        section('الغياب حسب الفصل', C.abs, e.absent.length);
+        var colW = (Wd - 2 * P - 20) / 2, colY = [y, y], lh = 34;
+        cls.forEach(function (c) {
+          var arr = byC[c].sort(function (a, b) { return (a.x === 'excused') - (b.x === 'excused') || a.n.localeCompare(b.n, 'ar'); });
+          var h = 70 + arr.length * lh + 12, ci = colY[0] <= colY[1] ? 0 : 1, x = ci === 0 ? Wd - P - colW : P, cy = colY[ci];
+          if (cy + h > MAXH - 400) return;
+          rr(x, cy, colW, h, 16, C.card, C.line);
+          txt(shortCls(c), x + colW - 22, cy + 42, fit(shortCls(c), 25, colW - 120), C.ink);
+          rr(x + 18, cy + 16, 64, 36, 18, '#fee2e2');
+          txt(String(arr.length), x + 50, cy + 42, 22, C.abs, 'bold', 'center');
+          g.fillStyle = C.line; g.fillRect(x + 18, cy + 60, colW - 36, 2);
+          arr.forEach(function (a, i) {
+            var ly = cy + 60 + 30 + i * lh, col = a.x === 'excused' ? C.exc : a.x === 'absent' ? C.abs : C.warn;
+            g.fillStyle = col; g.beginPath(); g.arc(x + colW - 30, ly - 7, 6, 0, 7); g.fill();
+            var nm = shortName(a.n), tag = a.x === 'excused' ? 'بعذر' : a.x === 'escape' ? 'هارب' : a.x === 'permit' ? 'مستأذن' : '';
+            txt(nm, x + colW - 46, ly, fit(nm, 21, colW - 150, 'normal'), C.ink, 'normal');
+            if (tag) txt(tag, x + 26, ly, 17, col, 'bold', 'left');
+          });
+          colY[ci] = cy + h + 16;
+        });
+        y = Math.max(colY[0], colY[1]) + 30;
+        // مفتاح الألوان
+        [['بدون عذر', C.abs], ['بعذر', C.exc], ['هارب/مستأذن', C.warn]].forEach(function (k, i) {
+          var x = Wd - P - i * 190; g.fillStyle = k[1]; g.beginPath(); g.arc(x - 8, y - 7, 7, 0, 7); g.fill(); txt(k[0], x - 24, y, 19, C.mut, 'normal');
+        });
+        y += 50;
+      }
+
+      // قوائم بصفوف
+      var rows = function (title, color, items, render) {
+        if (!items.length) return;
+        section(title, color, items.length);
+        var h = 20 + items.length * 52;
+        rr(P, y, Wd - 2 * P, h, 16, C.card, C.line);
+        items.forEach(function (r, i) {
+          var ry = y + 20 + i * 52;
+          if (i) { g.fillStyle = '#f1f5f9'; g.fillRect(P + 20, ry, Wd - 2 * P - 40, 2); }
+          render(r, ry + 34);
+        });
+        y += h + 46;
+      };
+      rows('يحتاج متابعة — غياب متتالٍ', C.warn, it.fu, function (r, ly) {
+        txt(shortName(r.n), Wd - P - 24, ly, 22, C.ink);
+        txt(shortCls(r.c), Wd - P - 420, ly, 20, C.mut, 'normal');
+        rr(P + 20, ly - 28, 150, 38, 19, '#fef3c7');
+        txt(r.days + ' أيام', P + 95, ly - 2, 20, C.warn, 'bold', 'center');
+      });
+      rows('غياب جزئي — حضر ثم غاب', '#f59e0b', e.partial, function (r, ly) {
+        txt(shortName(r.n), Wd - P - 24, ly, 22, C.ink);
+        txt(shortCls(r.c), Wd - P - 420, ly, 20, C.mut, 'normal');
+        txt('حاضر ح⁦' + r.f + '⁩  ←  ' + CAT_AR[r.x] + ' ح⁦' + r.a + '⁩', P + 24, ly, 20, C.warn, 'bold', 'left');
+      });
+      var tk = Object.keys(e.teachers).sort(function (a, b) { return e.teachers[b] - e.teachers[a]; });
+      if (tk.length) {
+        var mx = e.teachers[tk[0]] || 1;
+        rows('الحصص المرصودة إدارياً', C.pri, tk.slice(0, 15), function (t, ly) {
+          var n = e.teachers[t], bw = 300 * n / mx;
+          txt(t, Wd - P - 24, ly, fit(t, 21, 480, 'normal'), C.ink, 'normal');
+          rr(P + 90, ly - 22, 300, 24, 12, '#e0f2fe'); rr(P + 90 + 300 - bw, ly - 22, bw, 24, 12, '#0ea5e9');
+          txt(String(n), P + 24, ly, 22, C.pri, 'bold', 'left');
+        });
+      }
+      y += 20;
     });
-    if (!schools.length) { alert('لا توجد بيانات لهذا اليوم.'); return; }
-    var cv = drawReport({ title: '🔒 إقفال يوم ' + dayName, sub: fdate(ds), schools: schools, sections: sections });
-    deliverImage(cv, 'إقفال-اليوم-' + ds.replace(/\//g, '-') + '.png');
+    txt('أُعدّ آلياً بأداة رصد الحضور السريع — منصة مدرستي', Wd / 2, y, 18, '#94a3b8', 'normal', 'center');
+    y += 40;
+
+    var out = document.createElement('canvas'); out.width = Wd; out.height = Math.min(MAXH, y);
+    out.getContext('2d').drawImage(cv, 0, 0);
+    deliverImage(out, 'إقفال-اليوم-' + ds.replace(/\//g, '-') + '.png');
   }
 
   /* ---------- عرض السجل ---------- */
@@ -887,11 +1003,11 @@
       ds.forEach(function (d) {
         Object.keys(L[d]).forEach(function (sid) {
           var e = L[d][sid], pc = e.total ? Math.round(e.rec / e.total * 100) : 0, fu = followUp(L, d, sid).length;
-          rows.push('<tr><td>' + DAYS[new Date(d.replace(/\//g, '-') + 'T00:00').getDay()] + ' ' + esc(d) + '</td><td>' + esc(e.name) + '</td><td class="n">' + e.rec + '/' + e.total + '</td><td class="n" style="color:' + (pc >= 90 ? '#34d399' : pc >= 70 ? '#fbbf24' : '#f87171') + '">' + pc + '%</td><td class="n">' + e.admin + '</td><td class="n">' + (e.read ? e.absent.length : '—') + '</td><td class="n">' + (fu || '') + '</td></tr>');
+          rows.push('<tr class="lr" data-d="' + esc(d) + '" style="cursor:pointer"><td>🖼️ ' + DAYS[new Date(d.replace(/\//g, '-') + 'T00:00').getDay()] + ' ' + esc(d) + '</td><td>' + esc(e.name) + '</td><td class="n">' + e.rec + '/' + e.total + '</td><td class="n" style="color:' + (pc >= 90 ? '#34d399' : pc >= 70 ? '#fbbf24' : '#f87171') + '">' + pc + '%</td><td class="n">' + e.admin + '</td><td class="n">' + (e.read ? e.absent.length : '—') + '</td><td class="n">' + (fu || '') + '</td></tr>');
         });
       });
       body.innerHTML = '<table class="sum"><tr><th>اليوم</th><th>المدرسة</th><th>مرصود</th><th>النسبة</th><th>رُصد إدارياً</th><th>الغياب</th><th>متابعة</th></tr>' + rows.join('') + '</table>' +
-        '<div class="s">«—» في الغياب: لم تُقرأ الحصص المرصودة ذلك اليوم. «متابعة»: طلاب غائبون يومين متتاليين فأكثر.</div>';
+        '<div class="s">اضغط على أي يوم لإخراج صورة تقريره. «—» في الغياب: لم تُقرأ الحصص المرصودة ذلك اليوم. «متابعة»: طلاب غائبون يومين متتاليين فأكثر.</div>';
     }
     var td = slash(new Date()), redoS = Object.keys(L[td] || {}).filter(function (sid) { return (L[td][sid].ids || []).length; });
     $('sme-foot').innerHTML = (redoS.length ? '<button class="b go" id="sme-redo">🛠️ إعادة رصد حصص اليوم الإدارية (' + redoS.reduce(function (a, sid) { return a + L[td][sid].ids.length; }, 0) + ')</button>' : '') +
@@ -902,6 +1018,7 @@
       W.__smEngine.open({ closing: true, redo: true, schools: redoS.map(function (sid) { return { id: sid, name: L[td][sid].name }; }), currentSchoolId: redoS[0], concurrency: 3 });
     };
     if (!ds.length) return;
+    body.querySelectorAll('tr.lr').forEach(function (tr) { tr.onclick = function () { closingImage(tr.dataset.d); }; });
     $('sme-clr').onclick = function () { if (confirm('مسح سجل الأيام من هذا الجهاز؟')) { try { localStorage.removeItem(LKEY); } catch (e) {} showLog(); } };
     $('sme-wk').onclick = function () {
       var last = ds.slice(0, 5), agg = {}, lines = [], fu = {};
@@ -1115,6 +1232,7 @@
 
   W.__smEngine = {
     showLog: showLog,
+    dayImage: function (ds) { closingImage(ds); },
     detectSchool: detectSchool,
     pending: function () { var r = rLoad(); return r ? { count: r.items.length, at: r.at } : null; },
     discard: function () { try { localStorage.removeItem(RKEY); } catch (e) {} },
