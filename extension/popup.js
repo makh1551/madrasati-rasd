@@ -57,9 +57,8 @@ function pick(fn) {
   renderDays();
 }
 function chosenDates() {
-  return weekDates(parseInt($('week').value, 10))
-    .filter(function (d) { return selected[d.date] && !d.future; })
-    .map(function (d) { return { date: d.date, name: d.name + ' ' + d.label }; });
+  return Object.keys(selected).filter(function (k) { return selected[k] && k <= TODAY; }).sort()
+    .map(function (k) { return { date: k, name: k }; });
 }
 
 /* ---------- التعامل مع التبويب ---------- */
@@ -242,7 +241,16 @@ load(function (s) {
 });
 selected[TODAY] = true;
 renderDays();
-$('week').onchange = function () { selected = {}; renderDays(); };
+(function () {
+  var o = '';
+  for (var k = 0; k >= -10; k--) {
+    var w = weekDates(k), r = w[0].label + ' – ' + w[4].label;
+    var t = k === 0 ? 'الأسبوع الحالي' : k === -1 ? 'الأسبوع الماضي' : k === -2 ? 'قبل أسبوعين' : 'قبل ' + (-k) + ' أسابيع';
+    o += '<option value="' + k + '">' + t + ' (' + r + ')</option>';
+  }
+  $('week').innerHTML = o;
+})();
+$('week').onchange = renderDays;   // التحديد محفوظ عند التنقل بين الأسابيع
 $('pickToday').onclick = function (e) { e.preventDefault(); $('week').value = '0'; pick(function (d) { return d.date === TODAY; }); };
 $('pickAll').onclick = function (e) { e.preventDefault(); pick(function () { return true; }); };
 $('pickNone').onclick = function (e) { e.preventDefault(); pick(function () { return false; }); };

@@ -18,6 +18,20 @@
       return { name: n, date: ymd(d), label: d.getDate() + '/' + (d.getMonth() + 1), future: ymd(d) > TODAY };
     });
   }
+  function weekOptions() {
+    var o = '';
+    for (var k = 0; k >= -10; k--) {
+      var w = weekDates(k), r = w[0].label + ' – ' + w[4].label;
+      var t = k === 0 ? 'الأسبوع الحالي' : k === -1 ? 'الأسبوع الماضي' : k === -2 ? 'قبل أسبوعين' : 'قبل ' + (-k) + ' أسابيع';
+      o += '<option value="' + k + '">' + t + ' (' + r + ')</option>';
+    }
+    return o;
+  }
+  function pickWeeks(n) {   // كل الأيام الماضية في آخر n أسابيع (يشمل الحالي)
+    selected = {};
+    for (var k = 0; k > -n; k--) weekDates(k).forEach(function (d) { if (!d.future) selected[d.date] = true; });
+    renderDays();
+  }
   var store = {
     get: function (keys) { return new Promise(function (r) { try { chrome.storage.local.get(keys, function (v) { r(v || {}); }); } catch (e) { r({}); } }); },
     set: function (o) { try { chrome.storage.local.set(o); } catch (e) {} }
@@ -54,6 +68,7 @@
     '.qp{display:flex;justify-content:space-between;gap:8px}.qp button{background:none;border:0;color:#38bdf8;font-size:14.5px;padding:6px 0;cursor:pointer}' +
     '.sc{display:flex;align-items:center;gap:10px;font-size:15px;padding:4px 0}.sc input{width:20px;height:20px;margin:0}' +
     '.go{position:sticky;bottom:0;width:100%;min-height:56px;border:0;border-radius:14px;background:#047857;color:#fff;font-size:17px;font-weight:700;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.45)}' +
+    '.cnt{font-size:14px;color:#38bdf8;font-weight:700}.nm{flex:1;min-width:0;background:#0f172a;color:#e2e8f0;border:1px solid #475569;border-radius:8px;padding:8px 10px;font-size:15px}.del{background:none;border:0;color:#64748b;font-size:22px;width:36px;height:36px;cursor:pointer}' +
     '.go:disabled{opacity:.6}.msg{font-size:14px;line-height:1.6;color:#94a3b8;min-height:20px}.msg.err{color:#f87171}' +
     '</style>' +
     '<button class="fab" type="button" id="fab" aria-label="رصد الحضور السريع"><span aria-hidden="true">⚡</span><span>رصد</span></button>';
@@ -63,13 +78,34 @@
 
   function close() { if (panel) { panel.remove(); panel = null; } $('fab').style.display = 'flex'; }
 
+  var NAME_RE = /^(ابتدائية|متوسطة|ثانوية|مدرسة|مدارس|مجمع|روضة|معهد|الابتدائية|المتوسطة|الثانوية)\s+\S/;
+  function nameIn(doc) {
+    var best = '';
+    doc.querySelectorAll('span,small,p,div,a,h1,h2,h3,h4,h5,h6,li,label').forEach(function (el) {
+      if (el.children.length > 2) return;
+      var t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (t.length > 6 && t.length < 90 && NAME_RE.test(t) && (!best || t.length < best.length)) best = t;
+    });
+    return best;
+  }
+  async function schoolName() {
+    var n = nameIn(document);
+    if (n) return n;
+    try {
+      var r = await fetch('/', { credentials: 'include' });
+      if (r.ok) n = nameIn(new DOMParser().parseFromString(await r.text(), 'text/html'));
+    } catch (e) {}
+    return n;
+  }
+
   async function open() {
     var st = await store.get(['mode', 'names', 'namesDay', 'speed', 'schools']);
     current = window.__smEngine && window.__smEngine.detectSchool ? window.__smEngine.detectSchool() : null;
     schools = Array.isArray(st.schools) ? st.schools : [];
     if (current) {
+      if (!current.name || current.name === 'مدرستي') { var nm = await schoolName(); if (nm) current.name = nm; }
       var ex = schools.find(function (s) { return s.id === current.id; });
-      if (ex) { if (current.name && current.name !== 'مدرستي') ex.name = current.name; }
+      if (ex) { if (!ex.named && current.name && current.name !== 'مدرستي') ex.name = current.name; }
       else { schools.forEach(function (s) { s.on = false; }); schools.push({ id: current.id, name: current.name, on: true }); }
       store.set({ schools: schools });
     }
@@ -86,9 +122,11 @@
       '<label class="opt" id="oAll"><input type="radio" name="m" value="all"> ✅ جميع الطلاب حاضرون</label>' +
       '<label class="opt" id="oAbs"><input type="radio" name="m" value="abs"> ⚠️ يوجد غياب</label>' +
       '<div id="absBox" style="display:none"><div class="hint">اسم كل غائب في سطر (الاسم الأول واسم الأب على الأقل):</div><textarea id="names"></textarea></div>' +
-      '<div class="sec"><div class="row"><span class="lbl">الأسبوع:</span><select id="week"><option value="0">الأسبوع الحالي</option><option value="-1">الأسبوع الماضي</option><option value="-2">قبل أسبوعين</option></select></div>' +
+      '<div class="sec"><div class="row"><span class="lbl">الأسبوع:</span><select id="week">' + weekOptions() + '</select></div>' +
       '<div class="days" id="days"></div>' +
-      '<div class="qp"><button type="button" id="pT">اليوم فقط</button><button type="button" id="pA">الأسبوع كامل</button><button type="button" id="pN">إلغاء التحديد</button></div></div>' +
+      '<div class="qp"><button type="button" id="pT">اليوم فقط</button><button type="button" id="pA">هذا الأسبوع كامل</button></div>' +
+      '<div class="qp"><button type="button" id="p4">آخر 4 أسابيع</button><button type="button" id="p10">آخر 10 أسابيع</button><button type="button" id="pN">إلغاء الكل</button></div>' +
+      '<div class="cnt" id="cnt"></div></div>' +
       '<div class="sec"><div class="lbl">المدارس:</div><div id="sch"></div></div>' +
       '<div class="sec"><div class="row"><span class="lbl">السرعة:</span><select id="speed"><option value="1">عادية (حصة بحصة)</option><option value="2">سريعة (حصتان معاً)</option><option value="3">أسرع (3 حصص معاً)</option><option value="4">قصوى (4 حصص معاً)</option></select></div></div>' +
       '<div class="msg" id="msg"></div>' +
@@ -106,10 +144,12 @@
     $('x').onclick = close;
     root.querySelectorAll('input[name=m]').forEach(function (r) { r.onchange = function () { paintMode(); save(); }; });
     $('names').oninput = save;
-    $('week').onchange = function () { selected = {}; renderDays(); };
-    $('pT').onclick = function () { $('week').value = '0'; pick(function (d) { return d.date === TODAY; }); };
-    $('pA').onclick = function () { pick(function () { return true; }); };
-    $('pN').onclick = function () { pick(function () { return false; }); };
+    $('week').onchange = renderDays;   // التحديد محفوظ عند التنقل بين الأسابيع
+    $('pT').onclick = function () { $('week').value = '0'; selected = {}; selected[TODAY] = true; renderDays(); };
+    $('pA').onclick = function () { weekDates(parseInt($('week').value, 10)).forEach(function (d) { if (!d.future) selected[d.date] = true; }); renderDays(); };
+    $('p4').onclick = function () { pickWeeks(4); };
+    $('p10').onclick = function () { pickWeeks(10); };
+    $('pN').onclick = function () { selected = {}; renderDays(); };
     $('speed').onchange = function () { store.set({ speed: $('speed').value }); };
     $('go').onclick = go;
   }
@@ -133,6 +173,9 @@
       if (!d.future) b.onclick = function () { selected[d.date] = !selected[d.date]; renderDays(); };
       box.appendChild(b);
     });
+    var dates = Object.keys(selected).filter(function (k) { return selected[k]; });
+    var weeks = {}; dates.forEach(function (k) { var p = k.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2]); weeks[ymd(new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay()))] = 1; });
+    $('cnt').textContent = dates.length ? 'المحدد: ' + dates.length + (dates.length > 2 && dates.length < 11 ? ' أيام' : ' يوماً') + ' في ' + Object.keys(weeks).length + (Object.keys(weeks).length > 2 && Object.keys(weeks).length < 11 ? ' أسابيع' : Object.keys(weeks).length === 2 ? ' أسبوعين' : ' أسبوع') : 'لم يُحدد أي يوم';
   }
   function pick(fn) {
     selected = {};
@@ -143,12 +186,19 @@
     var box = $('sch');
     if (!schools.length) { box.innerHTML = '<div class="hint">ستُكتشف المدرسة من الصفحة تلقائياً عند الفحص.</div>'; return; }
     box.innerHTML = '';
-    schools.forEach(function (s) {
-      var l = document.createElement('label'); l.className = 'sc';
-      l.innerHTML = '<input type="checkbox"' + (s.on ? ' checked' : '') + '><span>' + esc(s.name) + (current && s.id === current.id ? ' <small style="color:#94a3b8">(الحالية)</small>' : '') + '</span>';
-      l.querySelector('input').onchange = function (e) { s.on = e.target.checked; store.set({ schools: schools }); };
+    schools.forEach(function (s, i) {
+      var l = document.createElement('div'); l.className = 'sc';
+      l.innerHTML = '<input type="checkbox" aria-label="تحديد المدرسة"' + (s.on ? ' checked' : '') + '>' +
+        '<input class="nm" type="text" aria-label="اسم المدرسة" value="' + esc(s.name) + '">' +
+        (current && s.id === current.id ? '<small style="color:#38bdf8;white-space:nowrap">الحالية</small>' : '') +
+        '<button class="del" type="button" aria-label="حذف المدرسة من القائمة">×</button>';
+      var ins = l.querySelectorAll('input');
+      ins[0].onchange = function (e) { s.on = e.target.checked; store.set({ schools: schools }); };
+      ins[1].onchange = function (e) { s.name = e.target.value.trim() || s.name; s.named = true; store.set({ schools: schools }); };
+      l.querySelector('.del').onclick = function () { schools.splice(i, 1); store.set({ schools: schools }); renderSchools(); };
       box.appendChild(l);
     });
+    box.insertAdjacentHTML('beforeend', '<div class="hint" style="margin:4px 0 0">اضغط على الاسم لتعديله. لإضافة مدرسة: افتح «قائمة المدارس» في المنصة، وانتقل إليها، ثم افتح هذه النافذة.</div>');
   }
   function say(t, err) { var m = $('msg'); m.textContent = t; m.className = 'msg' + (err ? ' err' : ''); }
 
@@ -157,7 +207,7 @@
     var m = mode();
     var names = $('names').value.split(/\n|،|,/).map(function (x) { return x.trim(); }).filter(function (x) { return x.length > 1; });
     if (m === 'abs' && !names.length) return say('اكتب أسماء الغائبين، أو اختر «جميع الطلاب حاضرون».', true);
-    var dates = weekDates(parseInt($('week').value, 10)).filter(function (d) { return selected[d.date] && !d.future; }).map(function (d) { return d.date; });
+    var dates = Object.keys(selected).filter(function (k) { return selected[k] && k <= TODAY; }).sort();
     if (!dates.length) return say('اختر يوماً واحداً على الأقل.', true);
     var chosen = schools.filter(function (s) { return s.on; }).map(function (s) { return { id: s.id, name: s.name }; });
     if (schools.length && !chosen.length) return say('اختر مدرسة واحدة على الأقل.', true);
