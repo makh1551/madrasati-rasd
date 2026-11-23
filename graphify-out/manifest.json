@@ -1,0 +1,98 @@
+{
+  "absence_addon.js": {
+    "mtime": 1795433157.1098592,
+    "seen": 1795433207.303553,
+    "ast_hash": "9d35e32e5649c04d7885c85e470deb56",
+    "semantic_hash": ""
+  },
+  "attendance_tracker.js": {
+    "mtime": 1795433157.1098592,
+    "seen": 1795433207.303561,
+    "ast_hash": "cbcee7688d3705d052766d1e560f5979",
+    "semantic_hash": ""
+  },
+  "extension/attendance_tracker.js": {
+    "mtime": 1795433157.1098592,
+    "seen": 1795433207.3035645,
+    "ast_hash": "cbcee7688d3705d052766d1e560f5979",
+    "semantic_hash": ""
+  },
+  "extension/content.js": {
+    "mtime": 1795433157.111749,
+    "seen": 1795433207.303566,
+    "ast_hash": "21f3ca94a2421bce5ed660b69721ca79",
+    "semantic_hash": ""
+  },
+  "extension/engine.js": {
+    "mtime": 1795433157.111749,
+    "seen": 1795433207.3035676,
+    "ast_hash": "5f4209634a47c91e071d5d9dad15bff2",
+    "semantic_hash": ""
+  },
+  "extension/manifest.json": {
+    "mtime": 1795433157.1124423,
+    "seen": 1795433207.3035688,
+    "ast_hash": "891c661892e16fff78b794e61dddd6a5",
+    "semantic_hash": ""
+  },
+  "extension/page_addon.js": {
+    "mtime": 1795433157.1124423,
+    "seen": 1795433207.30357,
+    "ast_hash": "91929d750335d3a277212815c7d5c4a9",
+    "semantic_hash": ""
+  },
+  "extension/popup.js": {
+    "mtime": 1795433157.1124423,
+    "seen": 1795433207.303571,
+    "ast_hash": "0a25f74e609285a364bb8bb19ae61f38",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1795433157.1098592,
+    "seen": 1795433207.3035722,
+    "ast_hash": "141b2c4216dc2e9aa637db7bf98bedc3",
+    "semantic_hash": ""
+  },
+  "extension/popup.html": {
+    "mtime": 1795433157.1124423,
+    "seen": 1795433207.3035736,
+    "ast_hash": "881778f86c2606735f82dfd1a6bbfd48",
+    "semantic_hash": ""
+  },
+  "extension/\u0637\u0631\u064a\u0642\u0629 \u0627\u0644\u062a\u062b\u0628\u064a\u062a.txt": {
+    "mtime": 1795433157.1124423,
+    "seen": 1795433207.3035753,
+    "ast_hash": "56e390da8dc984592611af73e8317722",
+    "semantic_hash": ""
+  },
+  "extension/icons/128.png": {
+    "mtime": 1795433157.111749,
+    "seen": 1795433207.303577,
+    "ast_hash": "d9fbc6d1fa3c70b52c614485a62a2c2c",
+    "semantic_hash": ""
+  },
+  "extension/icons/16.png": {
+    "mtime": 1795433157.1124423,
+    "seen": 1795433207.303578,
+    "ast_hash": "61d2007a40fcd4040d53ba6cc502cb5b",
+    "semantic_hash": ""
+  },
+  "extension/icons/32.png": {
+    "mtime": 1795433157.1124423,
+    "seen": 1795433207.3035789,
+    "ast_hash": "873733ea5d2ce23bb038f4e38a6f8772",
+    "semantic_hash": ""
+  },
+  "extension/icons/48.png": {
+    "mtime": 1795433157.1124423,
+    "seen": 1795433207.30358,
+    "ast_hash": "f0f559db1f08ff39b7901bd9b0a17fc9",
+    "semantic_hash": ""
+  },
+  "promo.mp4": {
+    "mtime": 1795433157.1248922,
+    "seen": 1795433207.3035815,
+    "ast_hash": "a511be825849be1261146d969f4811ca",
+    "semantic_hash": ""
+  }
+}

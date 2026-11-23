@@ -1,0 +1,16 @@
+{
+  "0": "attendance_tracker.js",
+  "1": "extension/attendance_tracker.js",
+  "2": "popup.js",
+  "3": "manifest.json",
+  "4": "engine.js",
+  "5": "content.js",
+  "6": "runSelected",
+  "7": "closingImage",
+  "8": "renderMap",
+  "9": "absence_addon.js",
+  "10": "renderPreview",
+  "11": "page_addon.js",
+  "12": "start",
+  "13": "أداة رصد الحضور — منصة مدرستي"
+}
